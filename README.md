@@ -2,7 +2,7 @@
 
 > **[Read the documentation](https://TheSmallPixel.github.io/IOL-ECHAT/)**
 
-> **University project** built for academic purposes as a coursework/thesis project. It is a learning-oriented reference implementation, not a production-hardened product.
+> **University project** built for academic purposes as a thesis project. It is a learning-oriented reference implementation, not a production-hardened product.
 
 Enterprise messaging system with end-to-end encryption (E2EE). The server cannot read message contents: all encryption and decryption happen on the client, and the server only stores ciphertext, wrapped keys, signatures, and metadata.
 
