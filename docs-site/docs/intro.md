@@ -1610,9 +1610,7 @@ dotnet test --settings coverage.runsettings --collect:"XPlat Code Coverage" --re
 
 # Aggregazione cross-progetto + report
 dotnet tool install -g dotnet-reportgenerator-globaltool
-reportgenerator -reports:coverage/**/coverage.copertura.xml \
-                -targetdir:coverage/report \
-                -reporttypes:"Html;TextSummary"
+reportgenerator -reports:coverage/**/coverage.cobertura.xml -targetdir:coverage/report -reporttypes:"Html;TextSummary"
 ```
 
 Il file `coverage.runsettings` (nella radice del repository) definisce l'ambito della misura escludendo i due assembly `*.App` (UI/host/adapter, fuori dall'ambito dei test di unità). Il riepilogo aggregato è in `coverage/report/Summary.txt` (copia committata in `docs-site/test-coverage/Summary.txt`); il report HTML interattivo è in `coverage/report/index.html`. I file copertura grezzi prodotti da `coverlet` sono in `coverage/<guid>/coverage.copertura.xml`.
@@ -1689,7 +1687,7 @@ cd tests/js && npm test                                      # crittografia WebC
 
 # Copertura (riproduce §4; prerequisito: dotnet tool install -g dotnet-reportgenerator-globaltool)
 dotnet test --settings coverage.runsettings --collect:"XPlat Code Coverage" --results-directory ./coverage
-reportgenerator -reports:coverage/**/coverage.copertura.xml -targetdir:coverage/report -reporttypes:"Html;TextSummary"
+reportgenerator -reports:coverage/**/coverage.cobertura.xml -targetdir:coverage/report -reporttypes:"Html;TextSummary"
 ```
 
 ---
