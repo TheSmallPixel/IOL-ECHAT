@@ -1,0 +1,9 @@
+namespace ECHAT.Models.Dtos;
+
+public class UserDto
+{
+    public Guid Id { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string? PictureUrl { get; set; }
+}

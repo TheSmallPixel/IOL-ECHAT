@@ -1,0 +1,37 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>4f71aa5c-d35d-4e96-b223-f9c568ac4919</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" Version="11.0.0-preview.4.26230.115" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="11.0.0-preview.4.26230.115" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="11.0.0-preview.4.26230.115" />
+    <!-- EF Core stays on 9.x because Pomelo (the MySQL provider) doesn't support EF Core 10
+         yet (Pomelo's latest pre-release pins to >= 9.0.0 && <= 9.0.999). The .NET 10 runtime
+         loads 9.x EF packages cleanly. Bump in lockstep with Pomelo when it ships a 10 release. -->
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="9.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Pomelo.EntityFrameworkCore.MySql" Version="9.0.0-preview.3.efcore.9.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="11.0.0-preview.4.26230.115" />
+    <!-- Swashbuckle is dropped: even 7.2 still throws TypeLoadException on .NET 10
+         (`SwaggerGenerator.GetSwagger` not implemented). The OpenAPI document is now produced
+         by the native Microsoft.AspNetCore.OpenApi (already referenced above), and the UI
+         comes from Scalar.AspNetCore, the modern replacement Microsoft itself recommends. -->
+    <PackageReference Include="Scalar.AspNetCore" Version="2.5.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ECHAT.Server.Core\ECHAT.Server.Core.csproj" />
+    <ProjectReference Include="..\ECHAT.Models\ECHAT.Models.csproj" />
+    <ProjectReference Include="..\ECHAT.Client.App\ECHAT.Client.App.csproj" />
+  </ItemGroup>
+
+</Project>

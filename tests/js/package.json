@@ -1,0 +1,9 @@
+{
+  "name": "echat-js-crypto-tests",
+  "private": true,
+  "type": "module",
+  "description": "Node tests for the production WebCrypto code in src/ECHAT.Client.App/wwwroot/js/echat-crypto.mjs. No dependencies; uses Node's built-in test runner and WebCrypto (Node 20+).",
+  "scripts": {
+    "test": "node --test"
+  }
+}

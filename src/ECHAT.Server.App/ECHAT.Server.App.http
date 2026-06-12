@@ -1,0 +1,9 @@
+@ECHAT.Server.App_HostAddress = https://localhost:7143
+
+GET {{ECHAT.Server.App_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
+
+GET {{ECHAT.Server.App_HostAddress}}/api/test/test
+Accept: application/json

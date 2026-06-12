@@ -1,0 +1,154 @@
+Summary
+  Generated on: 09/06/2026 - 15:10:23
+  Coverage date: 09/06/2026 - 15:10:13 - 09/06/2026 - 15:10:18
+  Parser: MultiReport (3x Cobertura)
+  Assemblies: 3
+  Classes: 128
+  Files: 99
+  Line coverage: 97%
+  Covered lines: 2682
+  Uncovered lines: 82
+  Coverable lines: 2764
+  Total lines: 5772
+  Branch coverage: 91.3% (720 of 788)
+  Covered branches: 720
+  Total branches: 788
+  Method coverage: 91.4% (472 of 516)
+  Full method coverage: 88.9% (459 of 516)
+  Covered methods: 472
+  Fully covered methods: 459
+  Total methods: 516
+
+ECHAT.Client.Core                                                97.1%
+  ECHAT.Client.Core.Commands.OutboxItem                           100%
+  ECHAT.Client.Core.Commands.SendMessageCommand                   100%
+  ECHAT.Client.Core.Interfaces.DeviceKeys                         100%
+  ECHAT.Client.Core.Interfaces.FilePartition                      100%
+  ECHAT.Client.Core.Interfaces.IAeadCipher                        100%
+  ECHAT.Client.Core.Interfaces.ISigner                            100%
+  ECHAT.Client.Core.Interfaces.MigrationIncompleteException       100%
+  ECHAT.Client.Core.Interfaces.MigrationProgress                 83.3%
+  ECHAT.Client.Core.Interfaces.ReencryptedEnvelope                100%
+  ECHAT.Client.Core.Interfaces.TombstoneRecord                    100%
+  ECHAT.Client.Core.Services.AeadCryptoEngine                     100%
+  ECHAT.Client.Core.Services.AiAutoReplyOrchestrator              100%
+  ECHAT.Client.Core.Services.AiReplyComposer                      100%
+  ECHAT.Client.Core.Services.BrowserLocalStoreImpl                100%
+  ECHAT.Client.Core.Services.CekProvisioner                       100%
+  ECHAT.Client.Core.Services.ChainValidator                       100%
+  ECHAT.Client.Core.Services.CustodianWorker                     93.3%
+  ECHAT.Client.Core.Services.DeviceEnrollmentService              100%
+  ECHAT.Client.Core.Services.FileCipher                           100%
+  ECHAT.Client.Core.Services.FileEncryptionOrchestrator           100%
+  ECHAT.Client.Core.Services.FileTransferStrategy                 100%
+  ECHAT.Client.Core.Services.GzipCompressor                       100%
+  ECHAT.Client.Core.Services.InMemoryOutboxStore                  100%
+  ECHAT.Client.Core.Services.InProcessCustodianCryptoOffloader    100%
+  ECHAT.Client.Core.Services.JwtTokenParser                       100%
+  ECHAT.Client.Core.Services.MessageFlowOrchestrator             92.2%
+  ECHAT.Client.Core.Services.MessageRenderer                     98.9%
+  ECHAT.Client.Core.Services.MigrationStateManager                100%
+  ECHAT.Client.Core.Services.OutboxService                        100%
+  ECHAT.Client.Core.Services.RandomDelayProvider                  100%
+  ECHAT.Client.Core.Services.ScrollLoader                         100%
+  ECHAT.Client.Core.Services.SequenceLeaseManager                 100%
+
+ECHAT.Models                                                     85.9%
+  ECHAT.Models.Domain.AttachmentRef                               100%
+  ECHAT.Models.Domain.DecryptedMessage                            100%
+  ECHAT.Models.Domain.EnvelopeHasher                              100%
+  ECHAT.Models.Domain.MessageEnvelope                             100%
+  ECHAT.Models.Domain.MessagePayload                              100%
+  ECHAT.Models.Dtos.AuditEntry                                    100%
+  ECHAT.Models.Dtos.AuditQueryFilter                              100%
+  ECHAT.Models.Dtos.ChainBoundary                                   0%
+  ECHAT.Models.Dtos.ChainValidationResult                         100%
+  ECHAT.Models.Dtos.ConversationDto                                 0%
+  ECHAT.Models.Dtos.DevicePublicKey                               100%
+  ECHAT.Models.Dtos.DeviceRegistration                            100%
+  ECHAT.Models.Dtos.EncryptResult                                 100%
+  ECHAT.Models.Dtos.FileCommitResult                                0%
+  ECHAT.Models.Dtos.FileUploadSession                               0%
+  ECHAT.Models.Dtos.MemberDto                                       0%
+  ECHAT.Models.Dtos.MessageAck                                    100%
+  ECHAT.Models.Dtos.ModerateMessageRequest                          0%
+  ECHAT.Models.Dtos.SeqReservation                                100%
+  ECHAT.Models.Dtos.UserDto                                       100%
+  ECHAT.Models.Dtos.WrappedKey                                    100%
+  ECHAT.Models.Events.ConversationChangedEvent                    100%
+  ECHAT.Models.Events.EpochRotatedEvent                           100%
+  ECHAT.Models.Events.JobProgressEvent                            100%
+  ECHAT.Models.Events.MemberChangedEvent                          100%
+  ECHAT.Models.Events.MessageAvailableEvent                       100%
+  ECHAT.Models.Events.MessageModeratedEvent                       100%
+  ECHAT.Models.Events.RealtimeEvent                               100%
+
+ECHAT.Server.Core                                                97.9%
+  ECHAT.Server.Core.Exceptions.ConcurrencyConflictException       100%
+  ECHAT.Server.Core.Exceptions.ConflictException                  100%
+  ECHAT.Server.Core.Exceptions.ForbiddenException                 100%
+  ECHAT.Server.Core.Exceptions.NotFoundException                  100%
+  ECHAT.Server.Core.Exceptions.ValidationException                100%
+  ECHAT.Server.Core.Interfaces.AiReplyOptions                     100%
+  ECHAT.Server.Core.Interfaces.AiUpstreamException                100%
+  ECHAT.Server.Core.Interfaces.ChainBoundaryRecord                100%
+  ECHAT.Server.Core.Interfaces.ConversationRecord                 100%
+  ECHAT.Server.Core.Interfaces.ConversationSummary                 50%
+  ECHAT.Server.Core.Interfaces.DevicePublicKeyRecord              100%
+  ECHAT.Server.Core.Interfaces.GoogleUserUpsert                   100%
+  ECHAT.Server.Core.Interfaces.InjectTombstoneRequest               0%
+  ECHAT.Server.Core.Interfaces.MembershipRecord                   100%
+  ECHAT.Server.Core.Interfaces.MemberWithUser                    57.1%
+  ECHAT.Server.Core.Interfaces.MigrationJobRecord                 100%
+  ECHAT.Server.Core.Interfaces.MigrationJobRequest                100%
+  ECHAT.Server.Core.Interfaces.PlatformStats                      100%
+  ECHAT.Server.Core.Interfaces.SeqCounter                         100%
+  ECHAT.Server.Core.Interfaces.SeqLeaseRecord                     100%
+  ECHAT.Server.Core.Interfaces.SeqRangeReservation                100%
+  ECHAT.Server.Core.Interfaces.TombstoneInjectionResult           100%
+  ECHAT.Server.Core.Interfaces.TombstoneSpec                      100%
+  ECHAT.Server.Core.Interfaces.UserConversationSummary              0%
+  ECHAT.Server.Core.Interfaces.UserDetail                        45.4%
+  ECHAT.Server.Core.Interfaces.UserRecord                         100%
+  ECHAT.Server.Core.Interfaces.UserSearchCandidate                100%
+  ECHAT.Server.Core.Interfaces.UserWithActivity                  27.2%
+  ECHAT.Server.Core.Pipeline.AuditHandler                         100%
+  ECHAT.Server.Core.Pipeline.DeduplicationHandler                 100%
+  ECHAT.Server.Core.Pipeline.IngestContext                        100%
+  ECHAT.Server.Core.Pipeline.LeaseValidationHandler               100%
+  ECHAT.Server.Core.Pipeline.NotifyHandler                        100%
+  ECHAT.Server.Core.Pipeline.PersistHandler                       100%
+  ECHAT.Server.Core.Pipeline.SenderIdentityHandler                100%
+  ECHAT.Server.Core.Pipeline.SignatureVerificationHandler         100%
+  ECHAT.Server.Core.Services.AiReplyService                       100%
+  ECHAT.Server.Core.Services.AvatarData                           100%
+  ECHAT.Server.Core.Services.AvatarService                       93.2%
+  ECHAT.Server.Core.Services.BlobFileAssemblyService              100%
+  ECHAT.Server.Core.Services.ConversationOperationsService       98.9%
+  ECHAT.Server.Core.Services.DeviceDirectoryService               100%
+  ECHAT.Server.Core.Services.EcdsaVerifier                        100%
+  ECHAT.Server.Core.Services.EnvelopeValidator                    100%
+  ECHAT.Server.Core.Services.ExistingUserSnapshot                 100%
+  ECHAT.Server.Core.Services.JwtTokenOptions                      100%
+  ECHAT.Server.Core.Services.JwtTokenResult                       100%
+  ECHAT.Server.Core.Services.JwtTokenService                      100%
+  ECHAT.Server.Core.Services.KeyAccessService                     100%
+  ECHAT.Server.Core.Services.MessageIngestPipeline                100%
+  ECHAT.Server.Core.Services.MessageModerationService             100%
+  ECHAT.Server.Core.Services.MigrationJobRunner                   100%
+  ECHAT.Server.Core.Services.MigrationOrchestratorService        99.4%
+  ECHAT.Server.Core.Services.OpenAiChoice                         100%
+  ECHAT.Server.Core.Services.OpenAiMessage                        100%
+  ECHAT.Server.Core.Services.OpenAiResponse                       100%
+  ECHAT.Server.Core.Services.PlatformStatisticsService            100%
+  ECHAT.Server.Core.Services.PolicyEnforcer                       100%
+  ECHAT.Server.Core.Services.QuotaService                         100%
+  ECHAT.Server.Core.Services.RetentionService                     100%
+  ECHAT.Server.Core.Services.SeqCounterDomainService              100%
+  ECHAT.Server.Core.Services.SeqRangeReservationResult            100%
+  ECHAT.Server.Core.Services.SequenceService                      100%
+  ECHAT.Server.Core.Services.TombstoneInjectionService            100%
+  ECHAT.Server.Core.Services.UserSearchService                    100%
+  ECHAT.Server.Core.Services.UserSyncService                      100%
+  ECHAT.Server.Core.Services.UserUpsertResult                     100%
+  ECHAT.Server.Core.Services.UserUpsertService                    100%

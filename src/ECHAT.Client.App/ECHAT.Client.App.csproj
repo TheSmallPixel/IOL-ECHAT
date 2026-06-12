@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest>
+    <!--
+      WasmEnableThreads is OFF on purpose. Originally tried on .NET 10 SDK 10.0.203: four runtime
+      breakages (timer locks, hot reload thread-mismatch, SemaphoreSlim, Blazor renderer
+      event-dispatch race). Now on .NET 11 preview.4 (11.0.100-preview.4.26230.115). The renderer
+      single-thread assumption is still not fixed; tracked in dotnet/aspnetcore#54365, still open
+      as of preview.4. The runtime moved to a "deputy thread" model but the Blazor renderer hasn't
+      been ported to it yet.
+
+      For offloading CPU work in .NET 11 the supported path is the `blazorwebworker` template:
+      run a separate .NET runtime inside a Web Worker, expose static methods via [JSExport], and
+      call them from the UI thread over postMessage. The renderer stays single-threaded; the worker
+      has its own isolated runtime. See: aka.ms/blazor-web-workers.
+
+      Until that's wired, chunked `await Task.Yield()` in our crypto code keeps the UI responsive.
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Markdig now lives in ECHAT.Client.Core (MessageRenderer); referenced transitively. -->
+    <!-- Markdig.SyntaxHighlighting (1.1.7) was tried but pulls ColorCode.Portable 1.0.3, which only
+         ships as a portable45-net45+win8+wp8+wpa81 PCL. Loading .NET Framework 4.5 binaries in
+         Blazor WebAssembly under net10.0 triggers NU1701 + likely TypeLoadException at runtime.
+         Code-block syntax highlighting is done client-side instead: Markdig emits
+         `<pre><code class="language-xxx">`, then highlight.js (`wwwroot/lib/highlight/`) is applied
+         in MessageBubble.OnAfterRenderAsync via the `echatHighlight.applyAll` JS helper. -->
+    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" Version="11.0.0-preview.4.26230.115" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="11.0.0-preview.4.26230.115" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="11.0.0-preview.4.26230.115" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="11.0.0-preview.4.26230.115" />
+    <!-- 8.x replaces the 7.0.0 advisory (NU1902); there's no 10.x of this package yet. -->
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ServiceWorker Include="wwwroot\service-worker.js" PublishedContent="wwwroot\service-worker.published.js" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ECHAT.Client.Core\ECHAT.Client.Core.csproj" />
+    <ProjectReference Include="..\ECHAT.Models\ECHAT.Models.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,268 @@
+@using ECHAT.Models.Dtos
+@using ECHAT.Models.Enums
+@inject IJSRuntime JS
+
+<div style="border-bottom:1px solid #e6e6e6; background:#fafafa; max-height:62vh; overflow-y:auto;">
+
+    @* ---- Members ---- *@
+    <div style="padding:14px 16px 6px;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+            <span style="font-size:0.7rem; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#888;">Members</span>
+            @if (Members != null)
+            {
+                <span style="font-size:0.72rem; color:#fff; background:#adb5bd; border-radius:10px; padding:1px 8px;">@Members.Count</span>
+            }
+        </div>
+
+        @if (Members != null)
+        {
+            @foreach (var m in Members)
+            {
+                var isSelf = m.Id == MyDeviceId;
+                <div style="padding:7px 0; border-top:1px solid #f0f0f0;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <img src="api/avatar/@m.Id" style="width:30px; height:30px; border-radius:50%; object-fit:cover; flex:0 0 auto; background:#e9ecef;" loading="lazy" />
+                        <div style="min-width:0; flex:1;">
+                            <div style="font-weight:500; font-size:0.9rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                @m.DisplayName@(isSelf ? " (you)" : "")
+                            </div>
+                        </div>
+                        <span style="@RoleBadgeStyle(m.Role)">@m.Role</span>
+
+                        @if (!isSelf && (IsOwner || (IsAdmin && m.Role != "Owner")))
+                        {
+                            <div style="display:flex; gap:6px; flex:0 0 auto;">
+                                @if (IsOwner && m.Role != "Owner")
+                                {
+                                    @if (m.Role != "Admin")
+                                    {
+                                        <button class="btn btn-sm btn-outline-secondary" style="@ActionBtn"
+                                                @onclick='() => ChangeRole(m, "Admin")' title="Promote to Admin">Make admin</button>
+                                    }
+                                    @if (m.Role != "Moderator")
+                                    {
+                                        <button class="btn btn-sm btn-outline-secondary" style="@ActionBtn"
+                                                @onclick='() => ChangeRole(m, "Moderator")' title="Make Moderator: can hide messages but not manage members/roles">Make moderator</button>
+                                    }
+                                    @if (m.Role != "Member")
+                                    {
+                                        <button class="btn btn-sm btn-outline-secondary" style="@ActionBtn"
+                                                @onclick='() => ChangeRole(m, "Member")' title="Demote to Member">Make member</button>
+                                    }
+                                }
+                                @if (IsOwner)
+                                {
+                                    <button class="btn btn-sm btn-outline-warning" style="@ActionBtn"
+                                            @onclick="() => ConfirmTransferOwnership(m)"
+                                            title="Transfer ownership of this conversation">Transfer</button>
+                                }
+                                @* L'Owner non si rimuove dal pannello: il server rifiuta il DELETE su un Owner. *@
+                                @if (IsAdmin && m.Role != "Owner")
+                                {
+                                    <button class="btn btn-sm btn-outline-danger" style="@ActionBtn"
+                                            @onclick="() => ToggleRemoveMenu(m.Id)" title="Remove from conversation">
+                                        @(_openRemoveMenuFor == m.Id ? "Cancel" : "Remove")
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+                    @if (_openRemoveMenuFor == m.Id)
+                    {
+                        <div style="margin:8px 0 4px 40px; padding:10px 12px; background:#fff; border:1px solid #e0e0e0; border-radius:6px; font-size:0.85em;">
+                            <div style="margin-bottom:8px; color:#444;">
+                                Remove <strong>@m.DisplayName</strong>. Choose how to handle their key access:
+                            </div>
+                            <div style="display:flex; flex-direction:column; gap:6px;">
+                                <button class="btn btn-sm btn-outline-warning" style="text-align:left;"
+                                        @onclick="() => InvokeRemove(m, null)"
+                                        title="Remove the member, rotate the conversation epoch and crypto-shred their wrapped CEKs on the server. Old envelopes stay encrypted with the old key.">
+                                    <strong>Remove + rotate keys</strong>
+                                    <span style="display:block; font-size:0.85em; color:#666;">New messages use a fresh CEK. Quick.</span>
+                                </button>
+                                <button class="btn btn-sm btn-danger" style="text-align:left;"
+                                        @onclick="() => InvokeRemove(m, MigrationMode.FullReencrypt)"
+                                        title="Rotate keys AND re-encrypt every historical envelope under the new CEK. Runs on this device; may take a while on large conversations.">
+                                    <strong>Remove + rotate + re-encrypt history</strong>
+                                    <span style="display:block; font-size:0.85em; color:#fde2e2;">Strongest revoke. Runs on this device. Slow on big conversations.</span>
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        }
+    </div>
+
+    @* ---- Add members ---- *@
+    @if (IsAdmin)
+    {
+        <div style="padding:10px 16px; border-top:1px solid #ececec;">
+            <div style="font-size:0.7rem; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#888; margin-bottom:8px;">Add members</div>
+            <div style="display:flex; gap:6px;">
+                <input value="@SearchQuery" @oninput="e => OnSearchQueryChanged.InvokeAsync(e.Value?.ToString() ?? string.Empty)"
+                       placeholder="Search by name or email…"
+                       style="padding:6px 10px; border:1px solid #ccc; border-radius:6px; flex:1; font-size:0.85rem;" />
+                <button class="btn btn-sm btn-primary" @onclick="() => OnSearch.InvokeAsync()">Search</button>
+            </div>
+            @if (SearchResults != null)
+            {
+                @if (SearchResults.Count == 0)
+                {
+                    <div style="font-size:0.8rem; color:#999; padding:8px 2px;">No users found.</div>
+                }
+                else
+                {
+                    <div style="margin-top:8px; display:flex; flex-direction:column; gap:4px;">
+                        @foreach (var u in SearchResults)
+                        {
+                            <div style="display:flex; align-items:center; gap:10px; padding:5px 8px; background:#fff; border:1px solid #eee; border-radius:6px;">
+                                <img src="api/avatar/@u.Id" style="width:26px; height:26px; border-radius:50%; object-fit:cover; background:#e9ecef;" loading="lazy" />
+                                <div style="min-width:0; flex:1;">
+                                    <div style="font-size:0.85rem; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">@u.DisplayName</div>
+                                    <div style="font-size:0.75rem; color:#999; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">@u.Email</div>
+                                </div>
+                                <button class="btn btn-sm btn-outline-primary" style="@ActionBtn" @onclick="() => OnAddMember.InvokeAsync(u.Id)">Add</button>
+                            </div>
+                        }
+                    </div>
+                }
+            }
+        </div>
+    }
+
+    @* ---- Conversation settings + danger zone ---- *@
+    @if (IsAdmin)
+    {
+        <div style="padding:10px 16px 14px; border-top:1px solid #ececec;">
+            <div style="font-size:0.7rem; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#888; margin-bottom:8px;">Conversation</div>
+            <div style="display:flex; gap:6px; margin-bottom:12px;">
+                <input value="@_renameValue" @oninput="e => _renameValue = e.Value?.ToString() ?? string.Empty"
+                       placeholder="Conversation name" maxlength="100"
+                       style="padding:6px 10px; border:1px solid #ccc; border-radius:6px; flex:1; font-size:0.9rem;" />
+                <button class="btn btn-sm btn-primary" @onclick="SaveRename"
+                        disabled="@(string.IsNullOrWhiteSpace(_renameValue) || _renameValue.Trim() == (ConversationName ?? string.Empty).Trim())">Rename</button>
+            </div>
+
+            <div style="border:1px solid #f1c5cd; background:#fdf2f4; border-radius:6px; padding:10px 12px;">
+                <div style="font-size:0.78rem; font-weight:600; color:#a02334; margin-bottom:2px;">Danger zone</div>
+                <div style="font-size:0.78rem; color:#8a6d72; margin-bottom:8px;">Permanently deletes all messages and keys for everyone. This cannot be undone.</div>
+                <button class="btn btn-sm btn-danger" @onclick="ConfirmDelete"
+                        title="Permanently delete this conversation for everyone (crypto-shred). Cannot be undone.">
+                    Delete conversation
+                </button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    // Stili condivisi inline (il progetto usa inline-styling ovunque).
+    private const string ActionBtn = "font-size:0.72rem; padding:2px 8px; white-space:nowrap;";
+
+    private static string RoleBadgeStyle(string role)
+    {
+        var (bg, fg) = role switch
+        {
+            "Owner" => ("#e7f1ff", "#0b5ed7"),
+            "Admin" => ("#e8eaf0", "#495057"),
+            "Moderator" => ("#fff3cd", "#8a6d3b"),
+            _        => ("#f1f3f5", "#868e96"),
+        };
+        return $"font-size:0.68rem; font-weight:600; padding:1px 8px; border-radius:10px; background:{bg}; color:{fg}; flex:0 0 auto;";
+    }
+}
+
+@code {
+    [Parameter] public List<MemberDto>? Members { get; set; }
+    [Parameter] public Guid MyDeviceId { get; set; }
+    [Parameter] public bool IsAdmin { get; set; }
+    [Parameter] public bool IsOwner { get; set; }
+    [Parameter] public string SearchQuery { get; set; } = string.Empty;
+    [Parameter] public List<UserDto>? SearchResults { get; set; }
+    [Parameter] public EventCallback<Guid> OnTransferOwnership { get; set; }
+    [Parameter] public EventCallback<RemoveMemberRequest> OnRemoveMember { get; set; }
+    [Parameter] public EventCallback<Guid> OnAddMember { get; set; }
+    [Parameter] public EventCallback OnSearch { get; set; }
+    [Parameter] public EventCallback<string> OnSearchQueryChanged { get; set; }
+    [Parameter] public string ConversationName { get; set; } = string.Empty;
+    [Parameter] public EventCallback<ChangeRoleRequest> OnChangeRole { get; set; }
+    [Parameter] public EventCallback<string> OnRename { get; set; }
+    [Parameter] public EventCallback OnDeleteConversation { get; set; }
+
+    public record RemoveMemberRequest(Guid UserId, MigrationMode? Migration);
+    public record ChangeRoleRequest(Guid UserId, string Role);
+
+    private string _renameValue = string.Empty;
+    private string? _lastConvName;
+
+    protected override void OnParametersSet()
+    {
+        // Reinizializza il campo rename quando cambia la conversazione (o quando il nome cambia
+        // da remoto), senza calpestare ciò che l'utente sta digitando nella stessa conversazione.
+        if (ConversationName != _lastConvName)
+        {
+            _renameValue = ConversationName;
+            _lastConvName = ConversationName;
+        }
+    }
+
+    private async Task SaveRename()
+    {
+        var name = _renameValue?.Trim() ?? string.Empty;
+        if (string.IsNullOrEmpty(name)) return;
+        await OnRename.InvokeAsync(name);
+    }
+
+    private async Task ChangeRole(MemberDto member, string newRole)
+    {
+        var message = newRole switch
+        {
+            "Admin" => $"Promote {member.DisplayName} to Admin? Admins can add/remove members, rename and delete the conversation.",
+            "Moderator" => $"Make {member.DisplayName} a Moderator? Moderators can hide inappropriate messages, but cannot manage members or roles.",
+            _ => $"Change {member.DisplayName} to Member?",
+        };
+        if (!await JS.InvokeAsync<bool>("confirm", message))
+            return;
+        await OnChangeRole.InvokeAsync(new ChangeRoleRequest(member.Id, newRole));
+    }
+
+    private async Task ConfirmDelete()
+    {
+        var message = "Delete this conversation for everyone? This permanently destroys all messages "
+            + "and encryption keys (crypto-shred) and cannot be undone.";
+        if (!await JS.InvokeAsync<bool>("confirm", message))
+            return;
+        await OnDeleteConversation.InvokeAsync();
+    }
+
+    private Guid? _openRemoveMenuFor;
+
+    private void ToggleRemoveMenu(Guid memberId)
+        => _openRemoveMenuFor = _openRemoveMenuFor == memberId ? null : memberId;
+
+    private async Task InvokeRemove(MemberDto member, MigrationMode? migration)
+    {
+        var message = migration switch
+        {
+            MigrationMode.FullReencrypt =>
+                $"Remove {member.DisplayName}, rotate keys AND re-encrypt every historical message under the new CEK? " +
+                "This runs on this device and may take a while on large conversations. Keep the tab open until it finishes.",
+            _ => $"Remove {member.DisplayName} and rotate the conversation keys? Old messages stay encrypted with the previous CEK."
+        };
+
+        if (!await JS.InvokeAsync<bool>("confirm", message))
+            return;
+
+        _openRemoveMenuFor = null;
+        await OnRemoveMember.InvokeAsync(new RemoveMemberRequest(member.Id, migration));
+    }
+
+    private async Task ConfirmTransferOwnership(MemberDto member)
+    {
+        var message = $"Transfer ownership to {member.DisplayName}? You will become an Admin and lose Owner privileges.";
+        var confirmed = await JS.InvokeAsync<bool>("confirm", message);
+        if (confirmed)
+            await OnTransferOwnership.InvokeAsync(member.Id);
+    }
+}

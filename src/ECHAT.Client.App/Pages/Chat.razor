@@ -1,0 +1,1584 @@
+@page "/conversations/{ConversationId:guid}"
+@attribute [Authorize]
+@using ECHAT.Client.App.Components
+@using ECHAT.Client.App.Services
+@using ECHAT.Client.Core.Interfaces
+@using ECHAT.Models.Domain
+@using ECHAT.Models.Dtos
+@using ECHAT.Models.Enums
+@using ECHAT.Models.Events
+@using Microsoft.AspNetCore.Components.Forms
+@inject ChatSdkService ChatSdk
+@inject SignalRRealtimeClient Realtime
+@inject IMigrationStateTracker MigrationTracker
+@inject HttpClient Http
+@inject TokenAuthStateProvider AuthState
+@inject NavigationManager Nav
+@inject AiAutoReplyService AiService
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>Chat · ECHAT</PageTitle>
+
+<div id="chat-page" style="display:flex; flex-direction:column; height:100vh; overflow:hidden; position:relative;">
+    @* Overlay di drop su tutta la pagina: appare quando il JS aggiunge .echat-dragging su #chat-page *@
+    <div class="echat-drop-overlay">
+        <div>Drop files anywhere to send</div>
+    </div>
+
+    <div style="padding:12px 16px; border-bottom:1px solid #e0e0e0; display:flex; align-items:center; gap:12px;">
+        <h4 style="margin:0; flex:1;">@_conversationName</h4>
+        <button class="btn btn-outline-secondary btn-sm" @onclick="ToggleMembers">@(_isAdmin ? "Manage" : "Members")</button>
+    </div>
+
+    @if (_showMembers)
+    {
+        <MembershipPanel Members="_members"
+                         MyDeviceId="_myDeviceId"
+                         IsAdmin="_isAdmin"
+                         IsOwner="_isOwner"
+                         SearchQuery="@_searchQuery"
+                         SearchResults="_searchResults"
+                         ConversationName="@_conversationName"
+                         OnTransferOwnership="TransferOwnership"
+                         OnRemoveMember="RemoveMember"
+                         OnAddMember="AddMember"
+                         OnChangeRole="ChangeRole"
+                         OnRename="RenameConversation"
+                         OnDeleteConversation="DeleteConversation"
+                         OnSearch="SearchUsers"
+                         OnSearchQueryChanged="@(v => _searchQuery = v)" />
+    }
+
+    @* Banner persistente per saga incompleta: il custode non è riuscito a ri-cifrare alcuni
+       envelope perché non aveva le CEK per quei vecchi epoch. Resta visibile (no auto-clear)
+       finché l'utente decide se cancellare oppure forzare il finalize accettando la perdita. *@
+    @if (_stuckJobId is not null && _stuckRemaining is not null)
+    {
+        <div style="padding:10px 16px; background:#fff3e0; border-bottom:1px solid #f0c995; display:flex; align-items:center; gap:12px;">
+            <span style="font-size:1.1em; color:#e65100;">⚠</span>
+            <div style="flex:1;">
+                <strong style="color:#e65100;">Migration incomplete</strong>
+                <span style="margin-left:6px; color:#555; font-size:0.9em;">
+                    @_stuckRemaining message(s) could not be re-encrypted because your account doesn't have the keys for those older epochs.
+                </span>
+                <div style="margin-top:4px; font-size:0.85em; color:#666;">
+                    Options: ask the conversation Owner to run the rotation instead, or force-finalize to accept the loss
+                    (those @_stuckRemaining message(s) become permanently unreadable).
+                </div>
+            </div>
+            <button class="btn btn-sm btn-danger" style="font-size:0.85em;" @onclick="ForceFinalizeStuckMigration"
+                    title="Crypto-shred the old keys regardless. The unreachable messages become permanently unreadable.">
+                Force finalize (lose @_stuckRemaining)
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" style="font-size:0.85em;"
+                    @onclick="() => { _stuckJobId = null; _stuckRemaining = null; }">
+                Dismiss
+            </button>
+        </div>
+    }
+
+    @* Banner di migrazione FullReencrypt: si autocompila da IMigrationStateTracker, quindi
+       reagisce sia alle saghe locali (IProgress del custode) sia a quelle guidate da altri
+       device sulla stessa conversazione (JobProgressEvent via SignalR).
+       Il composer è bloccato finché MigrationTracker.IsActive ritorna true (= fase non
+       terminale). Le fasi terminali restano visibili ~2.5s per dare feedback. *@
+    @{
+        var migState = MigrationTracker.Get(ConversationId);
+    }
+    @if (migState is not null)
+    {
+        // _cancelRequested è true tra il click su Cancel e l'arrivo della fase Cancelled.
+        // In quella finestra mostriamo "Cancelling…" così l'utente vede subito l'effetto.
+        var isCancelling = _cancelRequested
+            && migState.Phase is MigrationPhase.Starting or MigrationPhase.Reencrypting or MigrationPhase.Finalizing;
+
+        var percent = migState.Total is > 0
+            ? Math.Min(100, (int)(100L * migState.Processed / migState.Total.Value))
+            : (migState.Total is null && migState.Processed is > 0 and <= 100 ? migState.Processed : (int?)null);
+
+        // Tail "+ N skipped" se il custode non è riuscito a ri-cifrare alcuni envelope
+        // (CEK mancante per quel vecchio epoch, di solito perché l'utente attuale è entrato
+        // nella conversazione dopo, senza includeHistory). Quegli envelope restano al vecchio
+        // epoch e il safety check del server impedirà il finalize finché qualcuno con le CEK
+        // giuste non finisce il lavoro.
+        var skipText = migState.Skipped > 0 ? $" (+ {migState.Skipped} skipped, missing keys)" : "";
+
+        var statusText = isCancelling
+            ? "Cancelling…"
+            : migState.Phase switch
+            {
+                MigrationPhase.Starting    => "Starting…",
+                MigrationPhase.Reencrypting => migState.Total is > 0
+                    ? $"Re-encrypted {migState.Processed} of {migState.Total} message(s){skipText}"
+                    : (migState.Total is null && percent is not null
+                        ? $"~{percent}% (remote)"
+                        : $"Re-encrypted {migState.Processed} message(s){skipText}"),
+                MigrationPhase.Finalizing  => "Finalizing & crypto-shredding old keys…",
+                MigrationPhase.Completed   => "Completed",
+                MigrationPhase.Cancelled   => "Cancelled (partial state preserved)",
+                MigrationPhase.Failed      => $"Failed: {migState.Error}",
+                _ => ""
+            };
+
+        // Palette per fase: feedback colorato chiaro per Completed/Cancelled/Failed così l'esito
+        // si distingue a colpo d'occhio anche se la finestra dura solo 2.5s.
+        var (bg, border, accent, icon, headerText) = migState.Phase switch
+        {
+            MigrationPhase.Completed => ("#e8f5e9", "#a3d5ad", "#2e7d32", "✓", "Re-encryption completed"),
+            MigrationPhase.Cancelled => ("#fff3e0", "#f0c995", "#e65100", "⏹", "Re-encryption cancelled"),
+            MigrationPhase.Failed    => ("#fde2e2", "#e9a4a4", "#b71c1c", "⚠", "Re-encryption failed"),
+            _                        => ("#e7f1fb", "#bcd4ee", "#1264a3", "",  "Re-encrypting history…")
+        };
+
+        <div style="padding:10px 16px; background:@bg; border-bottom:1px solid @border; display:flex; align-items:center; gap:12px;">
+            @if (string.IsNullOrEmpty(icon))
+            {
+                <div class="spinner-border spinner-border-sm" role="status" style="width:1rem; height:1rem; color:@accent;"></div>
+            }
+            else
+            {
+                <span style="font-size:1.1em; color:@accent;">@icon</span>
+            }
+            <div style="flex:1;">
+                <strong style="color:@accent;">@headerText</strong>
+                <span style="margin-left:6px; color:#555; font-size:0.9em;">@statusText</span>
+                @if (percent is not null && !IsTerminalPhase(migState.Phase))
+                {
+                    <div style="margin-top:6px; height:6px; background:#cfe1f5; border-radius:3px; overflow:hidden;">
+                        <div style="height:100%; width:@(percent)%; background:@accent; transition:width 0.2s;"></div>
+                    </div>
+                }
+            </div>
+            @if (!IsTerminalPhase(migState.Phase))
+            {
+                <span style="font-size:0.85em; color:#777;">Sending paused</span>
+            }
+            @if (_migrationCts is not null && !_migrationCts.IsCancellationRequested
+                 && !IsTerminalPhase(migState.Phase))
+            {
+                <button class="btn btn-sm btn-outline-danger" style="font-size:0.8em;" @onclick="CancelMigration"
+                        title="Stop the re-encryption. Already-rewritten messages keep the new keys; the rest stay on the old keys.">
+                    Cancel
+                </button>
+            }
+            else if (isCancelling)
+            {
+                <span style="font-size:0.8em; color:#888; font-style:italic;">Cancelling…</span>
+            }
+        </div>
+    }
+
+    <div style="flex:1; overflow-y:auto; padding:16px;" id="messages-container" @onscroll="OnScroll">
+        @if (_keyAccessError is not null)
+        {
+            <div style="background:#fde2e1; border:1px solid #f1b0ac; color:#7a1f1a; border-radius:8px; padding:12px 14px; margin-bottom:12px; font-size:.88rem;">
+                <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
+                    <div><strong>This device can't open this conversation.</strong><br />@_keyAccessError</div>
+                    <button class="sidebar-logout" @onclick="() => _keyAccessError = null" title="Dismiss">✕</button>
+                </div>
+                <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+                    <button class="sidebar-btn-create" @onclick="RestoreKeyFromBanner">Restore key from file…</button>
+                </div>
+            </div>
+        }
+        @if (_loadingOlder)
+        {
+            <div style="text-align:center; padding:8px; color:#888; font-size:0.85em;">Loading older messages…</div>
+        }
+        @if (_messages == null)
+        {
+            <p>Loading messages...</p>
+        }
+        else if (_messages.Count == 0 && _keyAccessError is null)
+        {
+            <p style="color:#888; text-align:center;">No messages yet. Say something!</p>
+        }
+        else
+        {
+            @for (int idx = 0; idx < _messages.Count; idx++)
+            {
+                var msg = _messages[idx];
+                if (msg.Invisible) continue;
+
+                var prevMsg = idx > 0 ? _messages[idx - 1] : null;
+                var showHeader = prevMsg == null || prevMsg.SenderUserId != msg.SenderUserId || prevMsg.Invisible;
+
+                @* @key sul MessageId: tiene ogni MessageBubble (e il suo AttachmentPreview figlio)
+                   legato al suo messaggio reale. Senza questo, quando LoadMessages SOSTITUISCE la lista
+                   dopo un upload, Blazor riusa i componenti per posizione; un'immagine appena caricata
+                   finirebbe in uno slot il cui AttachmentPreview ha ancora lo stato vecchio dell'occupante
+                   precedente, quindi OnInitializedAsync non ripartirebbe e l'auto-load non girerebbe mai. *@
+                <MessageBubble @key="msg.MessageId"
+                               Message="msg"
+                               ConversationId="ConversationId"
+                               Sender="GetSender(msg.SenderUserId)"
+                               ShowHeader="showHeader"
+                               IsExpanded="_expandedInfoIds.Contains(msg.MessageId)"
+                               OnToggleInfo="ToggleInfo"
+                               CanModerate="CanModerateMessage(msg)"
+                               OnModerate="(bool hidden) => ModerateMessage(msg, hidden)" />
+            }
+        }
+    </div>
+
+    @if (_uploadStatus is not null)
+    {
+        <div style="padding:6px 16px; background:#fff8db; border-top:1px solid #f0e7a0; font-size:0.85em; color:#55471d;">
+            @_uploadStatus
+        </div>
+    }
+
+    @* Card composer in stile V1: toolbar + input + footer in un'unica superficie
+       arrotondata con focus ring gestito da :focus-within. Il selettore del formato
+       ora è un menu dropdown nella toolbar (sostituisce la vecchia riga di toggle);
+       i bottoni di formattazione (Bold/Italic/ecc.) appaiono solo in modalità Markdown. *@
+    <div class="echat-composer" @ref="_composerRef">
+        <div class="echat-composer-toolbar">
+            <div class="echat-format-menu" @ref="_formatMenuRef">
+                <button type="button"
+                        class="echat-format-btn @(_showFormatMenu ? "open" : "")"
+                        @onclick="ToggleFormatMenu"
+                        title="Change message format">
+                    @SvgIcon("format")
+                    <span>@FormatLabel(_format)</span>
+                    @SvgIcon("caret")
+                </button>
+                @if (_showFormatMenu)
+                {
+                    <div class="echat-format-popup">
+                        @foreach (var opt in _formatOptions)
+                        {
+                            <button type="button"
+                                    class="echat-format-option @(_format == opt.Format ? "active" : "")"
+                                    @onclick="@(() => PickFormat(opt.Format))">
+                                <span class="check">@SvgIcon("check")</span>
+                                <span class="info">
+                                    <div class="label">@opt.Label</div>
+                                    <div class="hint">@opt.Hint</div>
+                                </span>
+                                <span class="kbd">@opt.Kbd</span>
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+
+            @if (_format == MessageFormat.Markdown)
+            {
+                <span class="sep"></span>
+                <button class="echat-tb-btn" type="button" disabled="@_sending"
+                        title="Bold ⌘B" @onclick="@(() => MdInsertAsync("**", "**", "text"))">@SvgIcon("bold")</button>
+                <button class="echat-tb-btn" type="button" disabled="@_sending"
+                        title="Italic ⌘I" @onclick="@(() => MdInsertAsync("*", "*", "text"))">@SvgIcon("italic")</button>
+                <button class="echat-tb-btn" type="button" disabled="@_sending"
+                        title="Strike" @onclick="@(() => MdInsertAsync("~~", "~~", "text"))">@SvgIcon("strike")</button>
+                <span class="sep"></span>
+                <button class="echat-tb-btn" type="button" disabled="@_sending"
+                        title="Inline code" @onclick="@(() => MdInsertAsync("`", "`", "code"))">@SvgIcon("code")</button>
+                <button class="echat-tb-btn" type="button" disabled="@_sending"
+                        title="Code block" @onclick="@(() => MdInsertAsync("\n```\n", "\n```\n", "code"))">@SvgIcon("block")</button>
+                <button class="echat-tb-btn" type="button" disabled="@_sending"
+                        title="Quote" @onclick="@(() => MdInsertAsync("\n> ", "", "quote"))">@SvgIcon("quote")</button>
+                <span class="sep"></span>
+                <button class="echat-tb-btn" type="button" disabled="@_sending"
+                        title="Bulleted list" @onclick="@(() => MdInsertAsync("\n- ", "", "list item"))">@SvgIcon("list")</button>
+                <button class="echat-tb-btn" type="button" disabled="@_sending"
+                        title="Numbered list" @onclick="@(() => MdInsertAsync("\n1. ", "", "list item"))">@SvgIcon("ol")</button>
+                <button class="echat-tb-btn" type="button" disabled="@_sending"
+                        title="Link ⌘K" @onclick="@(() => MdInsertAsync("[", "](https://...)", "text"))">@SvgIcon("link")</button>
+            }
+
+            <span class="spacer"></span>
+
+            <div class="echat-popover-wrap" @ref="_mentionPickerRef">
+                <button class="echat-tb-btn @(_showMentionPicker ? "active" : "")"
+                        type="button" disabled="@_sending"
+                        title="Mention a member" @onclick="ToggleMentionPickerAsync">@SvgIcon("at")</button>
+                @if (_showMentionPicker)
+                {
+                    <div class="echat-popover echat-mention-popup">
+                        <input class="echat-mention-search" @ref="_mentionSearchRef"
+                               @bind="_mentionQuery" @bind:event="oninput"
+                               placeholder="Search members…"
+                               @onkeydown="OnMentionSearchKeyDown" />
+                        @{ var matches = FilteredMembers(); }
+                        @if (matches.Count == 0)
+                        {
+                            <div class="echat-mention-empty">No matches</div>
+                        }
+                        else
+                        {
+                            <div class="echat-mention-list">
+                                @foreach (var m in matches)
+                                {
+                                    <button type="button" class="echat-mention-item"
+                                            @onclick="@(() => PickMentionAsync(m))">
+                                        <img src="api/avatar/@m.Id" alt="" />
+                                        <span class="name">@m.DisplayName</span>
+                                        @if (!string.IsNullOrEmpty(m.Role) && m.Role != "Member")
+                                        {
+                                            <span class="role">@m.Role</span>
+                                        }
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="echat-popover-wrap" @ref="_emojiPickerRef">
+                <button class="echat-tb-btn @(_showEmojiPicker ? "active" : "")"
+                        type="button" disabled="@_sending"
+                        title="Emoji" @onclick="ToggleEmojiPickerAsync">@SvgIcon("smile")</button>
+                @if (_showEmojiPicker)
+                {
+                    <div class="echat-popover echat-emoji-popup">
+                        <div class="echat-emoji-grid">
+                            @foreach (var emoji in CommonEmojis)
+                            {
+                                <button type="button" class="echat-emoji-btn"
+                                        title="@emoji"
+                                        @onclick="@(() => PickEmojiAsync(emoji))">@emoji</button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="echat-composer-input">
+            <label class="echat-composer-attach" title="@(_migrationActive ? "Sending disabled during re-encryption" : "Attach files (or drag-and-drop)")"
+                   style="@(_migrationActive ? "opacity:0.4; pointer-events:none;" : "")">
+                @SvgIcon("attach")
+                <InputFile id="echat-file-input" OnChange="OnFilePicked" multiple style="display:none;" disabled="@_migrationActive" />
+            </label>
+            <div class="echat-composer-textarea-wrap">
+                @* Sempre una textarea così anche Plain può essere multi-riga (Shift+Enter inserisce
+                   un newline, Enter invia). L'attributo data-echat-format permette a `echat.js` di
+                   intercettare Enter sulle textarea Plain con preventDefault; altrimenti il newline
+                   nativo finirebbe nel valore dell'input prima che il nostro handler SendMessage lo legga. *@
+                <textarea id="echat-md-input"
+                          data-echat-format="@_format.ToString().ToLowerInvariant()"
+                          data-echat-autogrow="240"
+                          @bind="_inputText" @bind:event="oninput" @onkeydown="OnKeyDown"
+                          placeholder="@(_migrationActive ? "Sending paused while re-encryption is in progress…" : PlaceholderForFormat(_format, _conversationName))"
+                          rows="3"
+                          disabled="@_migrationActive"
+                          style="font-family:@(_format == MessageFormat.Html ? "var(--bs-font-monospace, monospace)" : "inherit");"></textarea>
+            </div>
+        </div>
+
+        <div class="echat-composer-footer">
+            @if (_format == MessageFormat.Plain)
+            {
+                <span><kbd>⏎</kbd> to send · <kbd>⇧⏎</kbd> for newline</span>
+            }
+            else
+            {
+                <span><kbd>⌘⏎</kbd> to send · <kbd>⏎</kbd> for newline</span>
+            }
+            @if (_format == MessageFormat.Html)
+            {
+                <span style="margin-left:6px;">· Sandboxed iframe, scripts blocked</span>
+            }
+            <span class="spacer"></span>
+            <div class="echat-send-split">
+                <button type="button" class="send" @onclick="SendMessage"
+                        disabled="@(_sending || _migrationActive || string.IsNullOrWhiteSpace(_inputText))">
+                    @SvgIcon("send")
+                    Send
+                </button>
+                <button type="button"
+                        class="ai @(_aiEnabled ? "ai-on" : "")"
+                        @onclick="ToggleAi"
+                        disabled="@_migrationActive"
+                        title="@(_migrationActive ? "Disabled during re-encryption" : (_aiEnabled ? "AI auto-reply is on. Click to disable." : "Enable AI auto-reply"))">
+                    @SvgIcon("sparkle")
+                    @(_aiEnabled ? "AI ON" : "AI")
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .msg-row:hover { background: #f8f8f8; }
+    .msg-row:hover .msg-actions { opacity: 1 !important; }
+
+    /* Overlay di drop: nascosto finché il JS non mette .echat-dragging sul container */
+    .echat-drop-overlay {
+        position: absolute; inset: 0;
+        display: none;
+        align-items: center; justify-content: center;
+        background: rgba(18, 100, 163, 0.08);
+        border: 3px dashed #1264a3;
+        border-radius: 8px;
+        font-size: 1.4em; font-weight: 600; color: #1264a3;
+        pointer-events: none; /* non intercettare gli eventi di drag; lasciali al container */
+        z-index: 5;
+    }
+    .echat-dragging .echat-drop-overlay { display: flex; }
+</style>
+
+@code {
+    [Parameter] public Guid ConversationId { get; set; }
+
+    private Guid _loadedConversationId;
+    private string _conversationName = "...";
+    private List<DecryptedMessage>? _messages;
+    private string _inputText = "";
+    private bool _sending;
+    private CancellationTokenSource? _migrationCts;
+    private bool _cancelRequested;
+    // Stato per recovery "force finalize": popolato dal catch di RemoveMember quando la saga
+    // fallisce con MigrationIncompleteException. La UI mostra un bottone destructive solo se
+    // questi sono valorizzati.
+    private Guid? _stuckJobId;
+    private int? _stuckRemaining;
+    private bool _migrationActive => MigrationTracker.IsActive(ConversationId);
+    private static bool IsTerminalPhase(MigrationPhase p)
+        => p is MigrationPhase.Completed or MigrationPhase.Cancelled or MigrationPhase.Failed;
+
+    // Serializza OnNewMessage: SignalR può consegnare un burst di MessageAvailable (es. molti
+    // file inviati uno dopo l'altro), ognuno scatena un'invocazione async void. Senza lock,
+    // tutte leggono lo stesso lastSeq prima che la prima abbia appeso  fetch ridondanti +
+    // possibili messaggi persi. Il semaforo garantisce un'invocazione alla volta.
+    private readonly SemaphoreSlim _newMessageLock = new(1, 1);
+
+    private bool _showMembers;
+    private List<MemberDto>? _members;
+    private Dictionary<Guid, MemberDto> _membersMap = new();
+    private Guid _myDeviceId;
+    private HashSet<Guid> _expandedInfoIds = new();
+    private bool _aiEnabled;
+    private string _searchQuery = "";
+    private List<UserDto>? _searchResults;
+    private bool _isAdmin;
+    private bool _isOwner;
+    private string? _myRole;   // ruolo del viewer nella conversazione (per i controlli di moderazione)
+    private string? _uploadStatus;
+    // Banner persistente mostrato quando questo device non possiede la chiave giusta per la
+    // conversazione (CEK wrappata per un'altra chiave): es. browser nuovo o storage azzerato.
+    private string? _keyAccessError;
+    private const string KeyAccessErrorText =
+        "The encryption key on this browser doesn't match this conversation. This happens on a new browser or after clearing storage. "
+        + "Restore your saved key file to regain access, or ask a conversation admin to re-share the key (Rotate).";
+    private const long MaxUploadBytes = 25L * 1024 * 1024; // limite UI da 25 MiB (il server limita ogni parte a 2 MiB)
+    private MessageFormat _format = MessageFormat.Plain;
+
+    // Composer V1: stato del dropdown del formato e gestione del click fuori.
+    private bool _showFormatMenu;
+    private ElementReference _composerRef;
+    private ElementReference _formatMenuRef;
+    private DotNetObjectReference<Chat>? _selfRef;
+    private int _formatMenuClickOutsideId;
+
+    private bool _showMentionPicker;
+    private ElementReference _mentionPickerRef;
+    private ElementReference _mentionSearchRef;
+    private string _mentionQuery = string.Empty;
+    private int _mentionPickerClickOutsideId;
+    private bool _mentionShouldFocus;
+
+    private bool _showEmojiPicker;
+    private ElementReference _emojiPickerRef;
+    private int _emojiPickerClickOutsideId;
+
+    // Set curato di emoji comuni per la chat. Lista piatta (niente categorie) così il
+    // picker resta piccolo e veloce. Mix di facce, gesti, cuori e simboli usati di frequente.
+    private static readonly string[] CommonEmojis = new[]
+    {
+        "😀","😄","😁","😆","😅","🤣","😂","🙂",
+        "🙃","😉","😊","😇","🥰","😍","😘","😋",
+        "😎","🤓","🤩","🥳","🤔","🤨","😐","😑",
+        "😶","🙄","😏","😒","😞","😔","😟","😕",
+        "🙁","😣","😩","😢","😭","😤","😡","🤬",
+        "👍","👎","👌","✌️","🤞","🤟","🤘","🤙",
+        "👈","👉","☝️","👋","🙏","👏","💪","🤝",
+        "❤️","🧡","💛","💚","💙","💜","🖤","🤍",
+        "🔥","✨","🎉","🎊","🚀","⭐","💯","✅",
+        "❌","❓","❗","⚠️","💡","📌","🔗","🎯",
+    };
+
+    private record FormatOption(MessageFormat Format, string Label, string Hint, string Kbd);
+    private static readonly FormatOption[] _formatOptions =
+    {
+        new(MessageFormat.Plain,    "Plain",    "No formatting",            "⌘⇧P"),
+        new(MessageFormat.Markdown, "Markdown", "# heading, **bold**, code", "⌘⇧M"),
+        new(MessageFormat.Html,     "HTML",     "Raw <tags>, sandboxed",     "⌘⇧H"),
+    };
+
+    private static string FormatLabel(MessageFormat f) => f switch
+    {
+        MessageFormat.Plain => "Plain",
+        MessageFormat.Markdown => "Markdown",
+        MessageFormat.Html => "HTML",
+        _ => f.ToString()
+    };
+
+    private static string PlaceholderForFormat(MessageFormat f, string convName) => f switch
+    {
+        MessageFormat.Plain => $"Message #{convName}",
+        MessageFormat.Markdown => "Markdown: # Heading, **bold**, `code`, [link](url)…",
+        MessageFormat.Html => "HTML: <p>Hello</p>",
+        _ => "Type a message…"
+    };
+
+    private async Task ToggleFormatMenu()
+    {
+        _showFormatMenu = !_showFormatMenu;
+        if (_showFormatMenu)
+        {
+            // Il DotNetObjectReference viene riusato tra un'apertura e l'altra.
+            _selfRef ??= DotNetObjectReference.Create(this);
+            try
+            {
+                _formatMenuClickOutsideId = await JS.InvokeAsync<int>(
+                    "echatClickOutside.on", _formatMenuRef, _selfRef, nameof(CloseFormatMenuFromJs));
+            }
+            catch { /* ignora: si può sempre chiudere ricliccando il bottone */ }
+        }
+        else
+        {
+            await CloseFormatMenuListenerAsync();
+        }
+    }
+
+    private async Task PickFormat(MessageFormat f)
+    {
+        _format = f;
+        _showFormatMenu = false;
+        await CloseFormatMenuListenerAsync();
+    }
+
+    [JSInvokable]
+    public async Task CloseFormatMenuFromJs()
+    {
+        if (_showFormatMenu)
+        {
+            _showFormatMenu = false;
+            await CloseFormatMenuListenerAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task CloseFormatMenuListenerAsync()
+    {
+        if (_formatMenuClickOutsideId > 0)
+        {
+            try { await JS.InvokeVoidAsync("echatClickOutside.off", _formatMenuClickOutsideId); } catch { }
+            _formatMenuClickOutsideId = 0;
+        }
+    }
+
+    private List<MemberDto> FilteredMembers()
+    {
+        if (_members is null || _members.Count == 0) return new();
+        // Nascondi se stesso: l'utente non dovrebbe menzionarsi col suo account.
+        IEnumerable<MemberDto> q = _members.Where(m => m.Id != _myDeviceId);
+        if (!string.IsNullOrWhiteSpace(_mentionQuery))
+        {
+            var term = _mentionQuery.Trim();
+            q = q.Where(m => m.DisplayName?.Contains(term, StringComparison.OrdinalIgnoreCase) == true);
+        }
+        return q.Take(20).ToList();
+    }
+
+    private async Task ToggleMentionPickerAsync()
+    {
+        if (_showMentionPicker)
+        {
+            await CloseMentionPickerAsync();
+            return;
+        }
+        // Chiudi prima qualsiasi altro picker aperto, così non abbiamo mai due popover ancorati che si pestano.
+        await CloseEmojiPickerAsync();
+        if (_showFormatMenu) { _showFormatMenu = false; await CloseFormatMenuListenerAsync(); }
+
+        _mentionQuery = string.Empty;
+        _showMentionPicker = true;
+        _mentionShouldFocus = true;
+        _selfRef ??= DotNetObjectReference.Create(this);
+        try
+        {
+            _mentionPickerClickOutsideId = await JS.InvokeAsync<int>(
+                "echatClickOutside.on", _mentionPickerRef, _selfRef, nameof(CloseMentionPickerFromJs));
+        }
+        catch { /* il listener è best-effort: l'utente può sempre cliccare il bottone per chiudere */ }
+    }
+
+    private async Task PickMentionAsync(MemberDto member)
+    {
+        // L'helper wrap inserisce al cursore se non c'è selezione, perfetto per le menzioni.
+        await JS.InvokeVoidAsync("echatMarkdown.wrap", "echat-md-input",
+            $"@{member.DisplayName} ", "", "");
+        await CloseMentionPickerAsync();
+    }
+
+    [JSInvokable]
+    public async Task CloseMentionPickerFromJs()
+    {
+        if (_showMentionPicker)
+        {
+            await CloseMentionPickerAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task CloseMentionPickerAsync()
+    {
+        _showMentionPicker = false;
+        _mentionQuery = string.Empty;
+        if (_mentionPickerClickOutsideId > 0)
+        {
+            try { await JS.InvokeVoidAsync("echatClickOutside.off", _mentionPickerClickOutsideId); } catch { }
+            _mentionPickerClickOutsideId = 0;
+        }
+    }
+
+    private async Task OnMentionSearchKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await CloseMentionPickerAsync();
+        else if (e.Key == "Enter")
+        {
+            // Enter sceglie il primo della lista.
+            var first = FilteredMembers().FirstOrDefault();
+            if (first is not null) await PickMentionAsync(first);
+        }
+    }
+
+    private async Task ToggleEmojiPickerAsync()
+    {
+        if (_showEmojiPicker)
+        {
+            await CloseEmojiPickerAsync();
+            return;
+        }
+        await CloseMentionPickerAsync();
+        if (_showFormatMenu) { _showFormatMenu = false; await CloseFormatMenuListenerAsync(); }
+
+        _showEmojiPicker = true;
+        _selfRef ??= DotNetObjectReference.Create(this);
+        try
+        {
+            _emojiPickerClickOutsideId = await JS.InvokeAsync<int>(
+                "echatClickOutside.on", _emojiPickerRef, _selfRef, nameof(CloseEmojiPickerFromJs));
+        }
+        catch { }
+    }
+
+    private async Task PickEmojiAsync(string emoji)
+    {
+        await JS.InvokeVoidAsync("echatMarkdown.wrap", "echat-md-input", emoji, "", "");
+        await CloseEmojiPickerAsync();
+    }
+
+    [JSInvokable]
+    public async Task CloseEmojiPickerFromJs()
+    {
+        if (_showEmojiPicker)
+        {
+            await CloseEmojiPickerAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task CloseEmojiPickerAsync()
+    {
+        _showEmojiPicker = false;
+        if (_emojiPickerClickOutsideId > 0)
+        {
+            try { await JS.InvokeVoidAsync("echatClickOutside.off", _emojiPickerClickOutsideId); } catch { }
+            _emojiPickerClickOutsideId = 0;
+        }
+    }
+
+    private RenderFragment SvgIcon(string name) => __builder =>
+    {
+        var (paths, fillPath) = name switch
+        {
+            "bold"    => (new[] { "M4.5 3h4a2.5 2.5 0 0 1 0 5h-4zM4.5 8h4.5a2.5 2.5 0 0 1 0 5H4.5z" }, false),
+            "italic"  => (new[] { "M10 3H6.5M9.5 13H6M9.5 3 7 13" }, false),
+            "strike"  => (new[] { "M3 8h10M5 5.5C5.4 4 6.6 3 8.2 3c1.7 0 2.8 1 2.8 2.3M11 10c0 1.6-1.3 3-3.2 3-1.7 0-3-1-3.3-2.3" }, false),
+            "code"    => (new[] { "m5 5-3 3 3 3M11 5l3 3-3 3M9.5 3.5 6.5 12.5" }, false),
+            "block"   => (new[] { "M2 4.5h12M2 8h12M2 11.5h7" }, false),
+            "quote"   => (new[] { "M3.5 5c-.6 1-.9 2-.9 3.2 0 .9.7 1.6 1.6 1.6S5.8 9.1 5.8 8.2 5.1 6.6 4.2 6.6M9.5 5c-.6 1-.9 2-.9 3.2 0 .9.7 1.6 1.6 1.6S11.8 9.1 11.8 8.2 11.1 6.6 10.2 6.6" }, false),
+            "list"    => (new[] { "M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01" }, false),
+            "ol"      => (new[] { "M6 4h7.5M6 8h7.5M6 12h7.5M2 3v3M2 6h2M2 11h2v1H2v1h2" }, false),
+            "link"    => (new[] { "M7 9.5 9 7.5M6.5 5.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9.5 10.5l-1 1a2.5 2.5 0 0 1-3.5-3.5l1-1" }, false),
+            "attach"  => (new[] { "M11.5 7 7.6 10.9a2.1 2.1 0 0 1-3-3l4-4a3 3 0 0 1 4.2 4.2L8.6 12.4" }, false),
+            "send"    => (new[] { "m2.5 8 11-5.5-3 11-2.5-4z" }, false),
+            "caret"   => (new[] { "m4 6 4 4 4-4" }, false),
+            "check"   => (new[] { "m3.5 8 3 3 6-6" }, false),
+            "format"  => (new[] { "M3 4h10M5 8h6M3 12h10" }, false),
+            "at"      => (new[] { "M13.5 8c0-3-2.5-5.5-5.5-5.5S2.5 5 2.5 8 5 13.5 8 13.5h2M10.5 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0v1a1.5 1.5 0 0 0 3 0V8" }, false),
+            "smile"   => (new[] { "M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12Z", "M5.5 9.5C6 10.5 7 11 8 11s2-.5 2.5-1.5M6 6.5h.01M10 6.5h.01" }, false),
+            "sparkle" => (new[] { "M8 2.5 9.2 6 12.5 7l-3.3 1L8 11.5 6.8 8 3.5 7l3.3-1zM12.5 11l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5z" }, true),
+            _         => (new[] { "" }, false),
+        };
+        var size = name == "attach" ? 18 : (name == "send" || name == "sparkle" ? 14 : 16);
+        if (fillPath)
+        {
+            <svg xmlns="http://www.w3.org/2000/svg" width="@size" height="@size" viewBox="0 0 16 16"
+                 fill="currentColor" stroke="none" aria-hidden="true">
+                @foreach (var p in paths) { <path d="@p" /> }
+            </svg>
+        }
+        else
+        {
+            <svg xmlns="http://www.w3.org/2000/svg" width="@size" height="@size" viewBox="0 0 16 16"
+                 fill="none" stroke="currentColor" stroke-width="1.6"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                @foreach (var p in paths) { <path d="@p" /> }
+            </svg>
+        }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SetAuth();
+
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        var idClaim = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (Guid.TryParse(idClaim, out var uid))
+            _myDeviceId = uid;
+
+        await Realtime.ConnectAsync();
+        Realtime.OnMessageAvailable += OnNewMessage;
+        Realtime.OnMemberChanged += OnMemberChanged;
+        Realtime.OnMessageModerated += OnMessageModerated;
+        Realtime.OnConversationChanged += OnConversationChanged;
+        Realtime.OnConnectionStateChanged += OnRealtimeConnectionChanged;
+        MigrationTracker.StateChanged += OnMigrationStateChanged;
+
+        await LoadConversationData();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedConversationId != Guid.Empty && _loadedConversationId != ConversationId)
+        {
+            await LoadConversationData();
+        }
+    }
+
+    private bool _dropZoneAttached;
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Drop zone: riprova finché attach() non risponde con successo. Protegge dal caso in cui
+        // il file input non sia ancora nel DOM al primo render, e da un re-render che sostituisce
+        // l'elemento.
+        if (!_dropZoneAttached)
+        {
+            try
+            {
+                var ok = await JS.InvokeAsync<bool>("echatDropZone.attach", "chat-page", "echat-file-input");
+                if (ok) _dropZoneAttached = true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[echat] dropZone attach error: {ex.Message}");
+            }
+        }
+
+        // Autofocus sulla search delle menzioni: parte una volta per apertura. L'<input> di ricerca
+        // è condizionale, quindi il suo ElementReference è valido solo dopo il render che lo mostra.
+        if (_mentionShouldFocus && _showMentionPicker)
+        {
+            _mentionShouldFocus = false;
+            try { await _mentionSearchRef.FocusAsync(); } catch { }
+        }
+    }
+
+    private async Task LoadConversationData()
+    {
+        _loadedConversationId = ConversationId;
+        _messages = null;
+        _showMembers = false;
+        _searchResults = null;
+        _searchQuery = "";
+        _expandedInfoIds.Clear();
+
+        await LoadConversation();
+        await LoadMembersInternal();
+        await LoadMessages();
+        // Niente JoinConversation: gli eventi SignalR sono indirizzati per utente, non per gruppo.
+        // LoadMessages scrolla già in fondo dopo il fetch iniziale.
+    }
+
+    private async Task SetAuth()
+    {
+        var token = await AuthState.GetTokenAsync();
+        if (!string.IsNullOrEmpty(token))
+            Http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+    }
+
+    private async Task ScrollToBottomIfNeeded()
+    {
+        try
+        {
+            // Auto-scroll solo se l'utente è già vicino al fondo; altrimenti lo strapperemmo
+            // via dalla cronologia vecchia che stava leggendo.
+            var nearBottom = await JS.InvokeAsync<bool>("eval",
+                "(function(){var el=document.getElementById('messages-container');" +
+                "return !!el && (el.scrollHeight - el.scrollTop - el.clientHeight < 150);})()");
+            if (nearBottom)
+                await JS.InvokeVoidAsync("echatScroll.toBottom", "messages-container");
+        }
+        catch { }
+    }
+
+    // I membri sono indicizzati per UserId (MemberDto.Id == userId); il mittente di un messaggio è
+    // identificato dal suo SenderUserId (NON dal SenderDeviceId fisico, che cambia per device/reset).
+    private MemberDto? GetSender(Guid senderUserId)
+    {
+        _membersMap.TryGetValue(senderUserId, out var member);
+        return member;
+    }
+
+    // Riconosce gli errori di "questo device non ha la chiave giusta": unwrap CEK fallito (chiave
+    // sbagliata) o nessun wrap disponibile per il device. Distinto da errori di rete/altro.
+    private static bool IsKeyAccessError(Exception ex)
+    {
+        var m = ex.Message ?? string.Empty;
+        return m.Contains("CEK unwrap failed", StringComparison.OrdinalIgnoreCase)
+            || m.Contains("unwrap", StringComparison.OrdinalIgnoreCase)
+            || m.Contains("No CEK available", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Azione del banner: apre il selettore file e, al ripristino della chiave, ricarica così
+    // l'enrollment ri-registra l'identità importata e il flusso messaggi riparte.
+    private async Task RestoreKeyFromBanner()
+    {
+        try
+        {
+            var imported = await JS.InvokeAsync<bool>("echatCrypto.importDeviceKeyFromPicker");
+            if (imported)
+                Nav.NavigateTo(Nav.Uri, forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[echat] restore key from banner failed: {ex.Message}");
+            _uploadStatus = $"Restore failed: {ex.Message}";
+            _ = ClearUploadStatusAfterDelayAsync();
+        }
+    }
+
+    private async Task LoadConversation()
+    {
+        try
+        {
+            var conv = await Http.GetFromJsonAsync<ConversationDto>($"api/conversations/{ConversationId}");
+            _conversationName = conv?.Name ?? "Chat";
+        }
+        catch { _conversationName = "Chat"; }
+    }
+
+    private async Task LoadMembersInternal()
+    {
+        try
+        {
+            _members = await Http.GetFromJsonAsync<List<MemberDto>>($"api/conversations/{ConversationId}/members");
+            _membersMap = _members?.ToDictionary(m => m.Id) ?? new();
+            var myMembership = _members?.FirstOrDefault(m => m.Id == _myDeviceId);
+            _myRole = myMembership?.Role;
+            _isOwner = myMembership?.Role == "Owner";
+            _isAdmin = myMembership?.Role == "Owner" || myMembership?.Role == "Admin";
+        }
+        catch { _members = new(); _membersMap = new(); _isAdmin = false; _isOwner = false; _myRole = null; }
+    }
+
+    private const int InitialPageSize = 50;
+    private const int OlderPageSize = 50;
+    private bool _loadingOlder;
+    private bool _hasMoreOlder = true;
+
+    private async Task LoadMessages()
+    {
+        // Stessa _newMessageLock di OnNewMessage: un fetch completo che assegna _messages = ...
+        // mentre un OnNewMessage incrementale sta appendendo sull'istanza VECCHIA della lista
+        // perderebbe i messaggi appena ricevuti dal SignalR. Acquisendo lo stesso semaforo
+        // serializziamo questi due flussi.
+        await _newMessageLock.WaitAsync();
+        try
+        {
+            try
+            {
+                // Apertura iniziale: il server restituisce i più recenti InitialPageSize messaggi, in ordine crescente.
+                _messages = await ChatSdk.FetchMessagesAsync(ConversationId, null, null, InitialPageSize);
+                // Server li ordina per Seq (necessario per la chain). Per la UI riordiniamo per
+                // CreatedAt: vedi commento in OnNewMessage sui seq pre-riservati.
+                SortMessagesForDisplay(_messages);
+                _hasMoreOlder = _messages.Count == InitialPageSize;
+                _keyAccessError = null; // fetch riuscito  la chiave va bene: rimuovi un eventuale banner
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[echat] LoadMessages failed: {ex.Message}");
+                _messages = new();
+                _hasMoreOlder = false;
+                if (IsKeyAccessError(ex)) _keyAccessError = KeyAccessErrorText;
+            }
+        }
+        finally
+        {
+            _newMessageLock.Release();
+        }
+        await ScrollToBottomNow();
+    }
+
+    /// <summary>
+    /// Recupera il prossimo batch di messaggi più vecchi (chiamata quando l'utente scrolla in cima).
+    /// Mantiene la posizione di scroll così i messaggi già visibili non saltano.
+    /// </summary>
+    private async Task LoadOlderAsync()
+    {
+        if (_loadingOlder || !_hasMoreOlder || _messages is null || _messages.Count == 0) return;
+
+        _loadingOlder = true;
+        StateHasChanged();
+        try
+        {
+            // Cursore SEMPRE per Seq (lo richiede l'endpoint del server). Non possiamo usare
+            // _messages[0].Seq perché ora la lista è ordinata per CreatedAt: il primo per
+            // display potrebbe non essere il più basso per Seq.
+            var oldestSeq = _messages.Min(m => m.Seq);
+            // Salva la distanza dal fondo così possiamo ripristinare lo scroll dopo il prepend.
+            var prevScrollHeight = await JS.InvokeAsync<double>("eval",
+                "document.getElementById('messages-container')?.scrollHeight ?? 0");
+
+            var older = await ChatSdk.FetchMessagesAsync(ConversationId, null, oldestSeq, OlderPageSize);
+            if (older.Count == 0)
+            {
+                _hasMoreOlder = false;
+                return;
+            }
+            _hasMoreOlder = older.Count == OlderPageSize;
+
+            // Merge + risorting per display. Dedup per MessageId per gestire eventuali overlap.
+            var existingIds = _messages.Select(m => m.MessageId).ToHashSet();
+            foreach (var m in older.Where(x => !existingIds.Contains(x.MessageId)))
+                _messages.Add(m);
+            SortMessagesForDisplay(_messages);
+            StateHasChanged();
+
+            // Ripristina lo scroll così la vista dell'utente non salta.
+            await JS.InvokeVoidAsync("eval",
+                $"(function(){{var el=document.getElementById('messages-container');if(!el)return;el.scrollTop=el.scrollHeight-{prevScrollHeight.ToString(System.Globalization.CultureInfo.InvariantCulture)};}})()");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[echat] LoadOlderAsync failed: {ex.Message}");
+        }
+        finally
+        {
+            _loadingOlder = false;
+            StateHasChanged();
+        }
+    }
+
+    private async void OnScroll()
+    {
+        try
+        {
+            var state = await JS.InvokeAsync<ScrollState>(
+                "echatScroll.getState", "messages-container", 150);
+            if (!state.Exists) return;
+
+            // Scatta quando siamo entro 80 px dal top.
+            if (state.Top < 80 && !_loadingOlder && _hasMoreOlder)
+                await LoadOlderAsync();
+
+            // Ogni volta che l'utente torna vicino al fondo della conversazione attiva,
+            // chiediamo a MainLayout di azzerare il contatore dei non letti per questa conv.
+            // Costa poco: è solo un'interop JS che si risolve in un remove sul dizionario
+            // più uno StateHasChanged in MainLayout.
+            if (state.NearBottom)
+                await JS.InvokeVoidAsync("echatRead.markRead", ConversationId.ToString());
+        }
+        catch { /* ignora */ }
+    }
+
+    private record ScrollState(bool Exists, double Top, bool NearBottom);
+
+    private async Task ScrollToBottomNow()
+    {
+        // Il render iniziale dispone i messaggi, ma i componenti AttachmentPreview continuano
+        // a spingere su scrollHeight man mano che <img>/<iframe>/blob: finiscono di decodificare;
+        // un singolo `scrollTop = scrollHeight` atterra sopra il fondo. L'helper sticky riancora
+        // al fondo a ogni animation frame per ~900 ms (o finché l'utente non scrolla), che è
+        // più che sufficiente per la preview più lenta su una pagina tipica.
+        await Task.Yield();
+        try { await JS.InvokeVoidAsync("echatScroll.toBottomSticky", "messages-container", 900); }
+        catch { }
+    }
+
+    private async void OnMemberChanged(MemberChangedEvent evt)
+    {
+        if (evt.ConversationId != ConversationId) return;
+
+        // Race noto: lo stesso evento "Removed" arriva a MainLayout (che ci naviga via
+        // dalla pagina, async) e a Chat.razor in parallelo. Se sei TU il rimosso, GET /members
+        // qui sotto restituisce 403 (ListMembersAsync esige membership attiva), e il server
+        // logga una ForbiddenException ogni volta. Skip esplicito: per te il refresh non serve,
+        // la navigazione di MainLayout sostituisce la pagina.
+        if (evt.Action == "Removed" && evt.UserId == _myDeviceId) return;
+
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                await LoadMembersInternal();
+                StateHasChanged();
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[echat] OnMemberChanged (Chat) crashed: {ex}");
+        }
+    }
+
+    // Un messaggio è stato nascosto/ri-mostrato (da noi o da un altro moderatore): ricarichiamo così
+    // l'orchestratore riapplica i flag e, in caso di unhide, ridecifra il contenuto da mostrare.
+    private async void OnMessageModerated(MessageModeratedEvent evt)
+    {
+        if (evt.ConversationId != ConversationId) return;
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                await LoadMessages();
+                StateHasChanged();
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[echat] OnMessageModerated (Chat) crashed: {ex}");
+        }
+    }
+
+    // Gerarchia ruoli (mirror lato client di MessageModerationService.Rank): Owner>Admin>Moderator>Member.
+    private static int RoleRank(string? role) => role switch
+    {
+        "Owner" => 3, "Admin" => 2, "Moderator" => 1, _ => 0
+    };
+
+    // Il viewer può moderare QUESTO messaggio se ha il permesso (ruolo >= Moderator) e o è il proprio
+    // messaggio o supera in grado il mittente. La regola è ri-validata lato server (questo è solo UI).
+    private bool CanModerateMessage(DecryptedMessage msg)
+    {
+        var myRank = RoleRank(_myRole);
+        if (myRank < 1) return false;                       // né Owner/Admin/Moderator  nessun controllo
+        if (msg.SenderUserId == _myDeviceId) return true;   // proprio messaggio
+        var senderRole = _membersMap.TryGetValue(msg.SenderUserId, out var s) ? s.Role : null;
+        return RoleRank(senderRole) <= myRank;
+    }
+
+    private async Task ModerateMessage(DecryptedMessage msg, bool hidden)
+    {
+        try
+        {
+            await ChatSdk.ModerateMessageAsync(ConversationId, msg.Seq, hidden, null);
+            await LoadMessages(); // l'evento realtime ricaricherebbe comunque; questo è per reattività immediata
+        }
+        catch (Exception ex)
+        {
+            _uploadStatus = $"Moderation failed: {ex.Message}";
+            _ = ClearUploadStatusAfterDelayAsync();
+        }
+    }
+
+    private async void OnNewMessage(MessageAvailableEvent evt)
+    {
+        try
+        {
+            if (evt.ConversationId != ConversationId) return;
+
+            // Un solo handler alla volta. Senza il lock, un burst di SignalR (10 file in fila)
+            // scatena 10 async void in parallelo; ciascuno legge lo stesso "ultimo seq" e fa
+            // fetch ridondanti che competono fra loro. Con il lock il flusso è serializzato.
+            await _newMessageLock.WaitAsync();
+            try
+            {
+                await InvokeAsync(async () =>
+                {
+                    // MAX(Seq), non LastOrDefault: il display può essere arrivato fuori ordine
+                    // (lease per-client  seq non strettamente monotonici nel tempo di arrivo),
+                    // quindi l'ultimo della lista per posizione potrebbe avere seq inferiore al
+                    // massimo. afterSeq=Max è l'unico cursore corretto per un incrementale.
+                    var lastSeq = _messages is { Count: > 0 } ? _messages.Max(m => m.Seq) : (long?)null;
+                    var newMsgs = await ChatSdk.FetchMessagesAsync(ConversationId, lastSeq, null, 50);
+                    Console.WriteLine($"[echat] OnNewMessage: evt.Seq={evt.Seq} fetched={newMsgs.Count} after={lastSeq}");
+
+                    if (_messages != null && newMsgs.Count > 0)
+                    {
+                        var added = false;
+                        foreach (var m in newMsgs)
+                        {
+                            if (_messages.All(x => x.MessageId != m.MessageId))
+                            {
+                                _messages.Add(m);
+                                added = true;
+                            }
+                        }
+                        // Display sort = CreatedAt + Seq tiebreaker.
+                        // I seq vengono dalle reservation per-client (lease batch), quindi
+                        // l'ordine numerico NON è cronologico: l'AI auto-reply che gira sulla
+                        // sessione di un membro consuma uno dei suoi seq pre-allocati e può
+                        // risultare numericamente PRIMA del messaggio originale che sta
+                        // rispondendo. CreatedAt è assegnato server-side al persist, quindi
+                        // riflette l'ordine reale di ingestion. La chain validation resta su
+                        // seq-order (FetchMessagesAsync visita gli envelope nell'ordine in cui
+                        // li restituisce il server, che è per seq): display e chain sono
+                        // ortogonali, va bene così.
+                        if (added)
+                        {
+                            SortMessagesForDisplay(_messages);
+                            StateHasChanged();
+                            await ScrollToBottomIfNeeded();
+                        }
+                    }
+                });
+            }
+            finally
+            {
+                _newMessageLock.Release();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[echat] OnNewMessage handler crashed: {ex}");
+        }
+    }
+
+    /// <summary>
+    /// Ordina la lista per visualizzazione: CreatedAt asc, Seq asc come tiebreaker. Vedi
+    /// commento in OnNewMessage: il display ha senso cronologico solo per CreatedAt perché
+    /// i seq sono pre-riservati per-client e arrivano fuori ordine quando più mittenti
+    /// (utente + AI) inviano in parallelo.
+    /// </summary>
+    private static void SortMessagesForDisplay(List<DecryptedMessage> messages)
+    {
+        messages.Sort((a, b) =>
+        {
+            var c = a.CreatedAt.CompareTo(b.CreatedAt);
+            return c != 0 ? c : a.Seq.CompareTo(b.Seq);
+        });
+    }
+
+    /// <summary>
+    /// Catch-up dopo un reconnect SignalR: gli eventi consegnati mentre eravamo disconnessi
+    /// sono persi (SignalR non li replay-a), quindi facciamo una LoadMessages completa appena
+    /// torniamo online. Senza questo, una flessione di rete durante un burst di file lascia
+    /// il banner fermo finché l'utente non scrive (la UX riportata dall'utente).
+    /// </summary>
+    private async void OnRealtimeConnectionChanged(ConnectionState state)
+    {
+        if (state != ConnectionState.Connected) return;
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                Console.WriteLine("[echat] SignalR reconnected; full refresh");
+                await LoadMessages();
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[echat] OnRealtimeConnectionChanged crashed: {ex}");
+        }
+    }
+
+    private async Task SendMessage()
+    {
+        if (string.IsNullOrWhiteSpace(_inputText)) return;
+        _sending = true;
+        try
+        {
+            // In modalità Plain l'input ora è una textarea multi-riga, quindi anche col
+            // preventDefault lato JS su Enter trimmiamo gli spazi finali in modo difensivo:
+            // un newline vagante potrebbe ancora insinuarsi se una race del browser o una
+            // stranezza di focus consegnasse il keydown all'@onkeydown di Blazor dopo che
+            // il default nativo l'ha già inserito.
+            var text = _format == MessageFormat.Plain ? _inputText.TrimEnd() : _inputText;
+            await ChatSdk.SendMessageAsync(ConversationId, text, _format);
+            _inputText = "";
+            // Pulire il valore via codice non scatena `input`, quindi il listener autogrow
+            // non se ne accorge; riportiamo esplicitamente la textarea alla sua altezza minima
+            // dopo l'invio.
+            try { await JS.InvokeVoidAsync("echatAutogrow.fit", "echat-md-input"); } catch { }
+            await LoadMessages();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Send failed: {ex.Message}");
+            if (IsKeyAccessError(ex))
+                _keyAccessError = KeyAccessErrorText;
+            else
+            {
+                _uploadStatus = $"Send failed: {ex.Message}";
+                _ = ClearUploadStatusAfterDelayAsync();
+            }
+        }
+        _sending = false;
+    }
+
+    private async Task OnKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (_sending) return;
+        // Plain  Enter invia, Shift+Enter inserisce un newline.
+        // Markdown / HTML  Enter inserisce un newline (di solito servono); Ctrl/Cmd+Enter invia.
+        if (_format == MessageFormat.Plain)
+        {
+            if (e.Key == "Enter" && !e.ShiftKey) await SendMessage();
+        }
+        else
+        {
+            if (e.Key == "Enter" && (e.CtrlKey || e.MetaKey)) await SendMessage();
+        }
+    }
+
+    private async Task OnFilePicked(InputFileChangeEventArgs e)
+    {
+        var files = e.GetMultipleFiles(maximumFileCount: 20);
+        if (files.Count == 0) return;
+
+        _sending = true;
+        try
+        {
+            var caption = string.IsNullOrWhiteSpace(_inputText) ? null : _inputText;
+            _inputText = "";
+            var sent = 0;
+
+            // Pre-riserva i seq di tutti i file in una sola chiamata invece di una per file.
+            // I SendFileAsync che seguono prendono i seq dalla memoria, senza altre chiamate.
+            try { await ChatSdk.PreReserveSeqsAsync(ConversationId, files.Count); }
+            catch (Exception ex) { Console.WriteLine($"[echat] PreReserveSeqsAsync failed: {ex.Message}"); }
+
+            for (int i = 0; i < files.Count; i++)
+            {
+                var file = files[i];
+
+                if (file.Size > MaxUploadBytes)
+                {
+                    _uploadStatus = $"Skipped {file.Name} ({file.Size / 1024.0 / 1024.0:F1} MiB > {MaxUploadBytes / 1024 / 1024} MiB cap)";
+                    StateHasChanged();
+                    continue;
+                }
+
+                _uploadStatus = files.Count == 1
+                    ? $"Encrypting & uploading {file.Name}…"
+                    : $"({i + 1}/{files.Count}) {file.Name}…";
+                StateHasChanged();
+
+                try
+                {
+                    using var stream = file.OpenReadStream(MaxUploadBytes);
+                    using var ms = new MemoryStream();
+                    await stream.CopyToAsync(ms);
+
+                    // La caption si attacca solo al primo file, così non si ripete sui multi-drop.
+                    await ChatSdk.SendFileAsync(
+                        ConversationId, ms.ToArray(), file.Name, file.ContentType,
+                        sent == 0 ? caption : null);
+                    sent++;
+                }
+                catch (Exception ex)
+                {
+                    _uploadStatus = $"Upload of {file.Name} failed: {ex.Message}";
+                    StateHasChanged();
+                }
+            }
+
+            _uploadStatus = sent > 0
+                ? $"Sent {sent} of {files.Count} file(s)"
+                : "No files were sent";
+            await LoadMessages();
+        }
+        finally
+        {
+            _sending = false;
+            StateHasChanged();
+            _ = ClearUploadStatusAfterDelayAsync();
+        }
+    }
+
+    /// <summary>
+    /// Auto-pulisce il banner di stato upload dopo 4 s. Fatto come singolo metodo async invece di
+    /// `Task.Delay(...).ContinueWith(...)` perché quest'ultimo smista la continuation su thread
+    /// diversi sotto WasmEnableThreads, e questo manda in tilt il lock della TimerQueue del runtime.
+    /// </summary>
+    private async Task ClearUploadStatusAfterDelayAsync()
+    {
+        var snapshot = _uploadStatus;
+        await Task.Delay(4000);
+        // Pulisci solo se il banner non è stato sostituito da un messaggio più recente.
+        if (!ReferenceEquals(_uploadStatus, snapshot)) return;
+        await InvokeAsync(() =>
+        {
+            _uploadStatus = null;
+            StateHasChanged();
+        });
+    }
+
+    private void ToggleInfo(Guid messageId)
+    {
+        if (!_expandedInfoIds.Remove(messageId))
+            _expandedInfoIds.Add(messageId);
+    }
+
+    private async Task ToggleAi()
+    {
+        AiService.SetMemberNames(_membersMap.ToDictionary(kv => kv.Key, kv => kv.Value.DisplayName));
+        await AiService.ToggleAsync(ConversationId);
+        _aiEnabled = AiService.IsEnabled;
+    }
+
+    private void ToggleMembers()
+    {
+        _showMembers = !_showMembers;
+    }
+
+    private async Task SearchUsers()
+    {
+        if (string.IsNullOrWhiteSpace(_searchQuery)) return;
+        _searchResults = await Http.GetFromJsonAsync<List<UserDto>>($"api/users/search?q={Uri.EscapeDataString(_searchQuery)}");
+        StateHasChanged();
+    }
+
+    private async Task AddMember(Guid userId)
+    {
+        await Http.PostAsJsonAsync($"api/conversations/{ConversationId}/members", new { UserId = userId });
+        // E2EE (S1): il server non copia più i wrap. Ri-wrappiamo la CEK corrente per i device del
+        // nuovo membro così può leggere i messaggi dell'epoch corrente. Se il grant fallisce il membro
+        // resta senza CEK: lo segnaliamo (riprovabile) invece di lasciare un'eccezione non gestita.
+        try
+        {
+            await ChatSdk.GrantConversationKeysAsync(ConversationId);
+        }
+        catch (Exception ex)
+        {
+            _uploadStatus = $"Member added, but the key grant failed, so they can't read messages yet. Remove and re-add them to retry. ({ex.Message})";
+            _ = ClearUploadStatusAfterDelayAsync();
+        }
+        _searchResults = null;
+        _searchQuery = "";
+        await LoadMembersInternal();
+    }
+
+    private async Task TransferOwnership(Guid targetUserId)
+    {
+        var response = await Http.PostAsJsonAsync($"api/conversations/{ConversationId}/transfer-ownership", new { TargetUserId = targetUserId });
+        if (response.IsSuccessStatusCode)
+        {
+            _uploadStatus = "Ownership transferred.";
+            await LoadMembersInternal();
+        }
+        else
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            _uploadStatus = $"Transfer failed ({(int)response.StatusCode}): {body}";
+        }
+        StateHasChanged();
+        _ = ClearUploadStatusAfterDelayAsync();
+    }
+
+    private async Task ChangeRole(MembershipPanel.ChangeRoleRequest req)
+    {
+        try
+        {
+            await ChatSdk.SetMemberRoleAsync(ConversationId, req.UserId, req.Role);
+            _uploadStatus = $"Role updated to {req.Role}.";
+            await LoadMembersInternal();
+        }
+        catch (Exception ex)
+        {
+            _uploadStatus = $"Role change failed: {ex.Message}";
+        }
+        StateHasChanged();
+        _ = ClearUploadStatusAfterDelayAsync();
+    }
+
+    private async Task RenameConversation(string newName)
+    {
+        try
+        {
+            await ChatSdk.RenameConversationAsync(ConversationId, newName);
+            _conversationName = newName;
+            _uploadStatus = "Conversation renamed.";
+        }
+        catch (Exception ex)
+        {
+            _uploadStatus = $"Rename failed: {ex.Message}";
+        }
+        StateHasChanged();
+        _ = ClearUploadStatusAfterDelayAsync();
+    }
+
+    private async Task DeleteConversation()
+    {
+        try
+        {
+            await ChatSdk.DeleteConversationAsync(ConversationId);
+            // La conversazione non esiste più: torna alla lista. Gli altri membri ricevono
+            // ConversationChanged/Deleted via SignalR e fanno lo stesso.
+            Nav.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("alert", $"Delete failed: {ex.Message}");
+        }
+    }
+
+    private async void OnConversationChanged(ConversationChangedEvent evt)
+    {
+        if (evt.ConversationId != ConversationId) return;
+        try
+        {
+            await InvokeAsync(() =>
+            {
+                if (evt.ChangeType == "Renamed")
+                {
+                    _conversationName = evt.Name ?? _conversationName;
+                    StateHasChanged();
+                }
+                else if (evt.ChangeType == "Deleted")
+                {
+                    Nav.NavigateTo("/");
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[echat] OnConversationChanged (Chat) crashed: {ex}");
+        }
+    }
+
+    /// <summary>
+    /// Inserisce <paramref name="before"/>/<paramref name="after"/> intorno alla selezione corrente nella
+    /// textarea markdown (id "echat-md-input"). Usato dai bottoni della toolbar. L'helper JS lancia
+    /// anche un evento <c>input</c> così il binding Blazor coglie il nuovo valore.
+    /// </summary>
+    private async Task MdInsertAsync(string before, string after, string placeholder)
+        => await JS.InvokeVoidAsync("echatMarkdown.wrap", "echat-md-input", before, after, placeholder);
+
+    private async Task RemoveMember(MembershipPanel.RemoveMemberRequest request)
+    {
+        // FullReencrypt è lungo: il tracker mostra il banner via StateChanged; qui ci limitiamo
+        // a creare un CTS così l'utente può Cancel dal banner stesso, e a beccare i casi
+        // OperationCanceled per non sbattere un alert quando è un'azione voluta.
+        var isFullReencrypt = request.Migration == MigrationMode.FullReencrypt;
+        if (isFullReencrypt)
+        {
+            _migrationCts = new CancellationTokenSource();
+            _cancelRequested = false;
+            _stuckJobId = null;
+            _stuckRemaining = null;
+        }
+
+        try
+        {
+            await ChatSdk.RemoveMemberAsync(
+                ConversationId, request.UserId, request.Migration,
+                progress: null,
+                ct: _migrationCts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException) when (isFullReencrypt && _migrationCts is { IsCancellationRequested: true })
+        {
+            // Cancellazione esplicita dell'utente: nessun alert.
+        }
+        catch (MigrationIncompleteException incomplete)
+        {
+            // Custode non aveva le CEK per ri-cifrare tutto. Memorizziamo il jobId + il count
+            // così il banner Failed può offrire "Force finalize". Non mostriamo l'alert
+            // perché il banner stesso comunica chiaramente la situazione.
+            _stuckJobId = incomplete.JobId;
+            _stuckRemaining = incomplete.RemainingEnvelopes;
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("alert", $"Remove failed: {ex.Message}");
+            return;
+        }
+        finally
+        {
+            // Atomic take-and-null per evitare la race con Dispose() della pagina che chiama
+            // Cancel+Dispose sullo stesso CTS in parallelo a questo finally. Solo uno dei due
+            // ottiene un riferimento non-null e fa Dispose; l'altro vede null e no-op.
+            var cts = Interlocked.Exchange(ref _migrationCts, null);
+            cts?.Dispose();
+            _cancelRequested = false;
+        }
+        await LoadMembersInternal();
+    }
+
+    private async Task ForceFinalizeStuckMigration()
+    {
+        if (_stuckJobId is null || _stuckRemaining is null) return;
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            $"FORCE FINALIZE will mark {_stuckRemaining} message(s) as permanently unreadable. " +
+            $"This cannot be undone. Continue?");
+        if (!confirmed) return;
+
+        try
+        {
+            await ChatSdk.ForceFinalizeMigrationAsync(ConversationId, _stuckJobId.Value);
+            _stuckJobId = null;
+            _stuckRemaining = null;
+            await JS.InvokeVoidAsync("alert", "Force-finalize complete. The conversation is rotated; the unreadable messages will show as decryption failures.");
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("alert", $"Force-finalize failed: {ex.Message}");
+        }
+        await LoadMessages();
+    }
+
+    private void CancelMigration()
+    {
+        _cancelRequested = true;
+        _migrationCts?.Cancel();
+        StateHasChanged();
+    }
+
+    private void OnMigrationStateChanged(Guid conversationId)
+    {
+        if (conversationId == ConversationId)
+            _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Realtime.OnMessageAvailable -= OnNewMessage;
+        Realtime.OnMemberChanged -= OnMemberChanged;
+        Realtime.OnMessageModerated -= OnMessageModerated;
+        Realtime.OnConversationChanged -= OnConversationChanged;
+        Realtime.OnConnectionStateChanged -= OnRealtimeConnectionChanged;
+        MigrationTracker.StateChanged -= OnMigrationStateChanged;
+        _newMessageLock.Dispose();
+        // Atomic take-and-null: evita la race con il finally di RemoveMember che potrebbe star
+        // disponendo lo stesso CTS in parallelo. CancellationTokenSource.Dispose non è safe per
+        // chiamate concorrenti.
+        var cts = Interlocked.Exchange(ref _migrationCts, null);
+        cts?.Cancel();
+        cts?.Dispose();
+        AiService.Disable();
+        // Stacca tutti i listener click-outside che potremmo aver lasciato attaccati. Ogni off()
+        // è dentro il suo try perché se uno fallisce non deve far saltare gli altri.
+        foreach (var id in new[] { _formatMenuClickOutsideId, _mentionPickerClickOutsideId, _emojiPickerClickOutsideId })
+        {
+            if (id > 0)
+            {
+                try { _ = JS.InvokeVoidAsync("echatClickOutside.off", id); } catch { }
+            }
+        }
+        _formatMenuClickOutsideId = 0;
+        _mentionPickerClickOutsideId = 0;
+        _emojiPickerClickOutsideId = 0;
+        _selfRef?.Dispose();
+    }
+
+}

@@ -1,0 +1,203 @@
+@using ECHAT.Client.App.Services
+@using ECHAT.Client.Core.Interfaces
+@using ECHAT.Models.Domain
+@using ECHAT.Models.Dtos
+@using ECHAT.Models.Enums
+@implements IAsyncDisposable
+@inject IMessageRenderer Renderer
+@inject IJSRuntime JS
+
+<div class="msg-row" style="display:flex; gap:10px; padding:@(ShowHeader ? "10px 16px 2px" : "1px 16px 1px"); align-items:flex-start;">
+    <div style="width:36px; flex-shrink:0; padding-top:2px;">
+        @if (ShowHeader && Sender != null)
+        {
+            <img src="api/avatar/@Sender.Id" alt="@Sender.DisplayName"
+                 style="width:36px; height:36px; border-radius:6px; object-fit:cover;" loading="lazy" />
+        }
+    </div>
+    <div style="flex:1; min-width:0;">
+        @if (ShowHeader)
+        {
+            <div style="display:flex; align-items:baseline; gap:8px;">
+                <span style="font-weight:700; font-size:0.94em; color:#1d1c1d;">@(Sender?.DisplayName ?? "Unknown")</span>
+                <span style="font-size:0.75em; color:#999;">@(Message.CreatedAt == default ? "" : Message.CreatedAt.ToLocalTime().ToString("HH:mm"))</span>
+                @if (HasError)
+                {
+                    <span style="cursor:pointer; color:#e53e3e; display:inline-flex; align-items:center;"
+                          title="Verification issue: click for details"
+                          @onclick="ToggleInfo">
+                        @InfoIcon(13)
+                    </span>
+                }
+            </div>
+        }
+        @if (Message.IsHidden)
+        {
+            @* Moderato: il contenuto non viene reso (il payload arriva già svuotato dall'orchestratore). *@
+            <div style="font-size:0.9em; color:#8a6d3b; background:#fcf8e3; border:1px solid #faebcc; border-radius:6px; padding:6px 10px; display:inline-block; font-style:italic;">
+                🚫 Message hidden by a moderator@(string.IsNullOrWhiteSpace(Message.ModerationReason) ? "" : $": {Message.ModerationReason}")
+            </div>
+        }
+        else
+        {
+            @if (!string.IsNullOrEmpty(Message.Payload.Text))
+            {
+                @switch (Message.Payload.Format)
+                {
+                    case MessageFormat.Markdown:
+                        <div class="msg-markdown" @ref="_markdownDiv"
+                             style="font-size:0.94em; color:#1d1c1d; line-height:1.46; word-break:break-word;">
+                            @((MarkupString)Renderer.MarkdownToHtml(Message.Payload.Text))
+                        </div>
+                        break;
+                    case MessageFormat.Html:
+                        @* Iframe in sandbox: attributo sandbox vuoto = script/form/popup/top-nav tutti bloccati,
+                           documento trattato come origin unica così non può leggere cookie/storage/DOM del parent.
+                           L'URL blob viene creato al primo render e revocato in DisposeAsync. *@
+                        <iframe @ref="_htmlFrame" sandbox="" referrerpolicy="no-referrer"
+                                style="width:100%; min-height:80px; border:1px solid #f0e7a0; border-radius:6px; background:white; margin-top:2px;"
+                                title="HTML message"></iframe>
+                        <div style="font-size:0.7em; color:#888; margin-top:2px;">Sandboxed HTML message</div>
+                        break;
+                    default:
+                        <div style="font-size:0.94em; color:#1d1c1d; line-height:1.46; word-break:break-word; white-space:pre-wrap;">@Message.Payload.Text</div>
+                        break;
+                }
+            }
+            @if (Message.Payload.Attachments is { Count: > 0 } atts)
+            {
+                @foreach (var att in atts)
+                {
+                    @* @key sul FileId così un re-render con lo stesso allegato mantiene l'URL blob caricato,
+                       mentre un allegato diverso forza un nuovo componente (rifà OnInitializedAsync). *@
+                    <AttachmentPreview @key="att.FileId"
+                                       Attachment="att"
+                                       ConversationId="ConversationId"
+                                       EpochId="Message.EpochId" />
+                }
+            }
+        }
+    </div>
+    <div class="msg-actions" style="flex-shrink:0; padding-top:2px; opacity:0; transition:opacity 0.15s; display:flex; gap:8px; align-items:center;">
+        @if (CanModerate)
+        {
+            <span style="cursor:pointer; color:@(Message.IsHidden ? "#007a5a" : "#e8912d"); display:inline-flex; align-items:center; font-size:14px;"
+                  title="@(Message.IsHidden ? "Unhide this message" : "Hide this message (moderation)")"
+                  @onclick="() => OnModerate.InvokeAsync(!Message.IsHidden)">
+                @(Message.IsHidden ? "👁" : "🚫")
+            </span>
+        }
+        <span style="cursor:pointer; color:@(HasError ? "#e53e3e" : "#aaa"); display:inline-flex; align-items:center;"
+              title="Message info"
+              @onclick="ToggleInfo">
+            @InfoIcon(14)
+        </span>
+    </div>
+</div>
+
+@if (IsExpanded)
+{
+    <div style="margin-left:62px; margin-right:16px; margin-bottom:4px; padding:8px 12px; border-radius:6px; background:#f8f8f8; border:1px solid #e8e8e8; font-size:0.8em; color:#616061;">
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:4px;">
+            <span>🔓 Decrypt: <b style="color:@(Message.DecryptionValid ? "#007a5a" : "#e01e5a")">@(Message.DecryptionValid ? "OK" : "FAILED")</b></span>
+            <span>🛡️ MAC: <b style="color:@(Message.MacValid ? "#007a5a" : "#e01e5a")">@(Message.MacValid ? "OK" : "FAILED")</b></span>
+            <span>🔢 Seq: <b style="color:@(Message.SeqValid ? "#007a5a" : "#e01e5a")">@(Message.SeqValid ? "OK" : "MISMATCH")</b></span>
+            <span>🔗 Chain: <b style="color:@(Message.ChainValid ? "#007a5a" : "#e8912d")">@(Message.ChainValid ? "OK" : "Break")</b></span>
+        </div>
+        <div style="color:#999; font-size:0.9em;">
+            Seq: @Message.Seq &nbsp;|&nbsp; Type: @Message.Type &nbsp;|&nbsp; MsgId: @Message.MessageId.ToString().Substring(0, 8)…
+            &nbsp;|&nbsp; Sender: @(Sender?.DisplayName ?? Message.SenderDeviceId.ToString().Substring(0, 8))
+            @if (!Message.ChainValid)
+            {
+                <div style="color:#e8912d; margin-top:2px;">⚠ Chain break: message hash does not match the previous envelope.</div>
+            }
+            @if (!Message.DecryptionValid)
+            {
+                <div style="color:#e01e5a; margin-top:2px;">⛔ Decryption failed: wrong key or corrupted data.</div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public DecryptedMessage Message { get; set; } = default!;
+    [Parameter, EditorRequired] public Guid ConversationId { get; set; }
+    [Parameter] public MemberDto? Sender { get; set; }
+    [Parameter] public bool ShowHeader { get; set; }
+    [Parameter] public bool IsExpanded { get; set; }
+    [Parameter] public EventCallback<Guid> OnToggleInfo { get; set; }
+    /// <summary>Il viewer può moderare QUESTO messaggio (permesso + regola di gerarchia). Calcolato dal parent.</summary>
+    [Parameter] public bool CanModerate { get; set; }
+    /// <summary>Invocato con lo stato target (true=nascondi, false=mostra) quando il viewer clicca il controllo.</summary>
+    [Parameter] public EventCallback<bool> OnModerate { get; set; }
+
+    private ElementReference _htmlFrame;
+    private string? _htmlBlobUrl;
+    private ElementReference _markdownDiv;
+    private string? _highlightedFor;  // testo per cui abbiamo già chiesto a highlight.js di colorare, così non ripetiamo a ogni render
+
+    private bool HasError => !Message.IsVerified
+        || !Message.DecryptionValid || !Message.MacValid
+        || !Message.SeqValid || !Message.ChainValid;
+
+    private Task ToggleInfo() => OnToggleInfo.InvokeAsync(Message.MessageId);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Message.Payload.Format == MessageFormat.Html
+            && !string.IsNullOrEmpty(Message.Payload.Text)
+            && _htmlBlobUrl is null)
+        {
+            // Materializziamo il body HTML come URL blob e puntiamo l'iframe in sandbox a quello.
+            // L'elemento iframe esiste solo dopo il primo render. Al re-render dello stesso
+            // messaggio (stesso MessageId via @key) l'URL blob è già collegato e lo lasciamo stare.
+            try
+            {
+                var bytes = System.Text.Encoding.UTF8.GetBytes(Message.Payload.Text);
+                _htmlBlobUrl = await JS.InvokeAsync<string>(
+                    "echatBlob.create", Convert.ToBase64String(bytes), "text/html");
+                await JS.InvokeVoidAsync("echatHtmlFrame.attach", _htmlFrame, _htmlBlobUrl);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[echat] HTML frame attach failed: {ex.Message}");
+            }
+        }
+
+        if (Message.Payload.Format == MessageFormat.Markdown
+            && !string.IsNullOrEmpty(Message.Payload.Text)
+            && _highlightedFor != Message.Payload.Text)
+        {
+            // A questo punto la div Markdown è nel DOM; chiediamo a highlight.js di colorare
+            // ogni <pre><code class="language-…"> al suo interno. echatHighlight.applyAll è
+            // idempotente sui nodi già evidenziati, quindi richiamarla costa poco se il testo
+            // del messaggio non è cambiato davvero.
+            try
+            {
+                await JS.InvokeVoidAsync("echatHighlight.applyAll", _markdownDiv);
+                _highlightedFor = Message.Payload.Text;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[echat] highlight failed: {ex.Message}");
+            }
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_htmlBlobUrl is not null)
+        {
+            try { await JS.InvokeVoidAsync("echatBlob.revoke", _htmlBlobUrl); } catch { }
+            _htmlBlobUrl = null;
+        }
+    }
+
+    private RenderFragment InfoIcon(int size) => __builder =>
+    {
+        <svg xmlns="http://www.w3.org/2000/svg" width="@size" height="@size" fill="currentColor" viewBox="0 0 16 16">
+            <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16" />
+            <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0" />
+        </svg>
+    };
+}

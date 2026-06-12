@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ECHAT.Client.App/ECHAT.Client.App.csproj" />
+    <Project Path="src/ECHAT.Client.Core/ECHAT.Client.Core.csproj" />
+    <Project Path="src/ECHAT.Models/ECHAT.Models.csproj" />
+    <Project Path="src/ECHAT.Server.App/ECHAT.Server.App.csproj" />
+    <Project Path="src/ECHAT.Server.Core/ECHAT.Server.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ECHAT.Client.Core.Tests/ECHAT.Client.Core.Tests.csproj" />
+    <Project Path="tests/ECHAT.Integration.Tests/ECHAT.Integration.Tests.csproj" />
+    <Project Path="tests/ECHAT.Server.Core.Tests/ECHAT.Server.Core.Tests.csproj" />
+  </Folder>
+</Solution>

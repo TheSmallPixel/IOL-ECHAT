@@ -1,0 +1,304 @@
+@page "/admin"
+@attribute [Authorize]
+@using ECHAT.Client.App.Services
+@inject HttpClient Http
+@inject TokenAuthStateProvider AuthState
+@inject NavigationManager Nav
+
+<PageTitle>Platform Admin · ECHAT</PageTitle>
+
+<div style="padding:24px; max-width:1000px; margin:0 auto; overflow-y:auto; height:100vh;">
+    @if (!_authorized)
+    {
+        <p style="color:#e53e3e;">Access denied. You are not a Platform Admin.</p>
+    }
+    else
+    {
+        <h3 style="margin-bottom:16px;">Platform Administration</h3>
+
+        @if (_stats != null)
+        {
+            <div style="display:flex; gap:16px; margin-bottom:24px; flex-wrap:wrap;">
+                <div class="stat-card">
+                    <div class="stat-value">@_stats.TotalUsers</div>
+                    <div class="stat-label">Users</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">@_stats.TotalConversations</div>
+                    <div class="stat-label">Conversations</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">@_stats.TotalMessages</div>
+                    <div class="stat-label">Messages</div>
+                </div>
+            </div>
+        }
+
+        <h4 style="margin-bottom:12px;">Users</h4>
+        @if (_users == null)
+        {
+            <p>Loading...</p>
+        }
+        else
+        {
+            <table style="width:100%; border-collapse:collapse; font-size:0.88rem;">
+                <thead>
+                    <tr style="border-bottom:2px solid #e0e0e0; text-align:left;">
+                        <th style="padding:8px;">User</th>
+                        <th style="padding:8px;">Email</th>
+                        <th style="padding:8px;">Role</th>
+                        <th style="padding:8px;">Chats</th>
+                        <th style="padding:8px;">Messages</th>
+                        <th style="padding:8px;">Status</th>
+                        <th style="padding:8px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var u in _users)
+                    {
+                        <tr style="border-bottom:1px solid #f0f0f0;">
+                            <td style="padding:8px; display:flex; align-items:center; gap:8px;">
+                                <img src="api/avatar/@u.Id" style="width:24px; height:24px; border-radius:50%; object-fit:cover;" loading="lazy" />
+                                <span>@u.DisplayName</span>
+                            </td>
+                            <td style="padding:8px; color:#666;">@u.Email</td>
+                            <td style="padding:8px;">
+                                <span style="font-size:0.78em; padding:2px 6px; border-radius:4px; background:@(u.PlatformRole == "PlatformAdmin" ? "#e8f5e9" : "#f5f5f5"); color:@(u.PlatformRole == "PlatformAdmin" ? "#2e7d32" : "#666");">@u.PlatformRole</span>
+                            </td>
+                            <td style="padding:8px;">@u.ConversationCount</td>
+                            <td style="padding:8px;">@u.MessageCount</td>
+                            <td style="padding:8px;">
+                                <span style="font-size:0.78em; color:@(u.IsActive ? "#2e7d32" : "#e53e3e");">@(u.IsActive ? "Active" : "Inactive")</span>
+                            </td>
+                            <td style="padding:8px;">
+                                @if (u.PlatformRole != "PlatformAdmin")
+                                {
+                                    <button class="btn btn-sm btn-outline-primary" style="font-size:0.7em; padding:2px 6px; margin-right:4px;" @onclick="() => PromoteUser(u.Id)">Make Admin</button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-outline-secondary" style="font-size:0.7em; padding:2px 6px; margin-right:4px;" @onclick="() => DemoteUser(u.Id)">Remove Admin</button>
+                                }
+                                @if (u.IsActive)
+                                {
+                                    <button class="btn btn-sm btn-outline-danger" style="font-size:0.7em; padding:2px 6px;" @onclick="() => DeactivateUser(u.Id)">Deactivate</button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-outline-success" style="font-size:0.7em; padding:2px 6px;" @onclick="() => ActivateUser(u.Id)">Activate</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+        <h4 style="margin-top:32px; margin-bottom:12px; display:flex; align-items:center; gap:12px;">
+            Audit log
+            <button class="btn btn-sm btn-outline-secondary" style="font-size:0.7em; padding:2px 8px;" @onclick="LoadAudit">Refresh</button>
+        </h4>
+
+        <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center; flex-wrap:wrap;">
+            <button class="btn btn-sm @(_auditFilterMode == "all" ? "btn-primary" : "btn-outline-secondary")" style="font-size:0.7em; padding:2px 8px;" @onclick='() => SetFilter("all")'>All</button>
+            <button class="btn btn-sm @(_auditFilterMode == "24h" ? "btn-primary" : "btn-outline-secondary")" style="font-size:0.7em; padding:2px 8px;" @onclick='() => SetFilter("24h")'>Last 24h</button>
+            @* Questi valori devono essere identici alle stringhe Action salvate dal server.
+               Se aggiungi una nuova Action lato server, aggiungila anche qui. *@
+            <select style="font-size:0.78em; padding:2px 6px;" @bind="_auditActionFilter" @bind:after="LoadAudit">
+                <option value="">Any action</option>
+                <optgroup label="Messages">
+                    <option value="MessageIngested">MessageIngested</option>
+                    <option value="GapTombstonesInjected">GapTombstonesInjected</option>
+                </optgroup>
+                <optgroup label="Members">
+                    <option value="ConversationCreated">ConversationCreated</option>
+                    <option value="MemberAdded">MemberAdded</option>
+                    <option value="MemberRemoved">MemberRemoved</option>
+                    <option value="OwnershipTransferred">OwnershipTransferred</option>
+                    <option value="RoleChanged">RoleChanged</option>
+                </optgroup>
+                <optgroup label="Migration">
+                    <option value="MigrationStarted">MigrationStarted</option>
+                    <option value="MigrationCompleted">MigrationCompleted</option>
+                    <option value="MigrationCancelled">MigrationCancelled</option>
+                    <option value="MigrationForceFinalized">MigrationForceFinalized</option>
+                </optgroup>
+                <optgroup label="Files">
+                    <option value="FileUploadStarted">FileUploadStarted</option>
+                    <option value="FileUploadFinalized">FileUploadFinalized</option>
+                    <option value="FileDownloaded">FileDownloaded</option>
+                </optgroup>
+            </select>
+            <span style="font-size:0.78em; color:#888;">@(_audit?.Count ?? 0) entries</span>
+        </div>
+
+        @if (_audit == null)
+        {
+            <p>Loading audit log...</p>
+        }
+        else if (_audit.Count == 0)
+        {
+            <p style="color:#888;">No audit entries match the current filter.</p>
+        }
+        else
+        {
+            <div style="max-height:60vh; overflow:auto; border:1px solid #e0e0e0; border-radius:6px;">
+                <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+                    <thead style="position:sticky; top:0; background:#f8f9fa;">
+                        <tr style="border-bottom:2px solid #e0e0e0; text-align:left;">
+                            <th style="padding:6px 8px;">Timestamp</th>
+                            <th style="padding:6px 8px;">Action</th>
+                            <th style="padding:6px 8px;">User</th>
+                            <th style="padding:6px 8px;">Conversation</th>
+                            <th style="padding:6px 8px;">Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var a in _audit)
+                        {
+                            <tr style="border-bottom:1px solid #f0f0f0;">
+                                <td style="padding:6px 8px; color:#666; white-space:nowrap;">@a.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                <td style="padding:6px 8px;"><code style="font-size:0.85em;">@a.Action</code></td>
+                                <td style="padding:6px 8px; font-family:monospace; font-size:0.78em; color:#666;">@(a.UserId?.ToString()[..8] ?? "-")</td>
+                                <td style="padding:6px 8px; font-family:monospace; font-size:0.78em; color:#666;">@a.ConversationId.ToString()[..8]</td>
+                                <td style="padding:6px 8px; color:#444; word-break:break-all;">@a.Details</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</div>
+
+<style>
+    .stat-card {
+        background: #f8f9fa;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 16px 24px;
+        text-align: center;
+        min-width: 120px;
+    }
+    .stat-value {
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: #333;
+    }
+    .stat-label {
+        font-size: 0.8rem;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+</style>
+
+@code {
+    private bool _authorized;
+    private StatsDto? _stats;
+    private List<AdminUserDto>? _users;
+    private List<AuditDto>? _audit;
+    private string _auditFilterMode = "24h";  // Parte dalle ultime 24h per mostrare meno righe all'avvio
+    private string _auditActionFilter = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var token = await AuthState.GetTokenAsync();
+        if (!string.IsNullOrEmpty(token))
+            Http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+        try
+        {
+            var response = await Http.GetAsync("api/admin/stats");
+            if (response.IsSuccessStatusCode)
+            {
+                _authorized = true;
+                _stats = await response.Content.ReadFromJsonAsync<StatsDto>();
+                await LoadUsers();
+                await LoadAudit();
+            }
+        }
+        catch { }
+    }
+
+    private async Task LoadUsers()
+    {
+        _users = await Http.GetFromJsonAsync<List<AdminUserDto>>("api/admin/users");
+    }
+
+    private async Task LoadAudit()
+    {
+        // Aggiunge alla URL solo i filtri attivi: così il server non deve sapere
+        // come funziona la UI (il filtro "tutto" non manda nessun parametro).
+        var qs = new List<string>();
+        if (_auditFilterMode == "24h")
+            qs.Add($"since={Uri.EscapeDataString(DateTime.UtcNow.AddHours(-24).ToString("o"))}");
+        if (!string.IsNullOrEmpty(_auditActionFilter))
+            qs.Add($"action={Uri.EscapeDataString(_auditActionFilter)}");
+        qs.Add("limit=200");
+        var url = $"api/admin/audit?{string.Join("&", qs)}";
+        try { _audit = await Http.GetFromJsonAsync<List<AuditDto>>(url); }
+        catch { _audit = new(); }
+    }
+
+    private async Task SetFilter(string mode)
+    {
+        _auditFilterMode = mode;
+        await LoadAudit();
+    }
+
+    private async Task PromoteUser(Guid userId)
+    {
+        await Http.PostAsJsonAsync($"api/admin/users/{userId}/role", new { Role = "PlatformAdmin" });
+        await LoadUsers();
+    }
+
+    private async Task DemoteUser(Guid userId)
+    {
+        await Http.PostAsJsonAsync($"api/admin/users/{userId}/role", new { Role = "User" });
+        await LoadUsers();
+    }
+
+    private async Task DeactivateUser(Guid userId)
+    {
+        await Http.PostAsync($"api/admin/users/{userId}/deactivate", null);
+        await LoadUsers();
+    }
+
+    private async Task ActivateUser(Guid userId)
+    {
+        await Http.PostAsync($"api/admin/users/{userId}/activate", null);
+        await LoadUsers();
+    }
+
+    private class StatsDto
+    {
+        public int TotalUsers { get; set; }
+        public int TotalConversations { get; set; }
+        public int TotalMessages { get; set; }
+    }
+
+    private class AdminUserDto
+    {
+        public Guid Id { get; set; }
+        public string Email { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+        public string? PictureUrl { get; set; }
+        public string PlatformRole { get; set; } = "";
+        public bool IsActive { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime LastLoginAt { get; set; }
+        public int ConversationCount { get; set; }
+        public int MessageCount { get; set; }
+    }
+
+    private class AuditDto
+    {
+        public long Id { get; set; }
+        public Guid ConversationId { get; set; }
+        public Guid? UserId { get; set; }
+        public string Action { get; set; } = "";
+        public DateTime Timestamp { get; set; }
+        public string? Details { get; set; }
+    }
+}

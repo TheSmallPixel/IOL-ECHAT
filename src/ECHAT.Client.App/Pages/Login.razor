@@ -1,0 +1,44 @@
+@page "/login"
+@using ECHAT.Client.App.Services
+@inject NavigationManager Navigation
+@inject TokenAuthStateProvider AuthStateProvider
+
+<PageTitle>Login · ECHAT</PageTitle>
+
+<div style="display:flex; justify-content:center; align-items:center; height:80vh;">
+    <div style="text-align:center;">
+        @if (_processing)
+        {
+            <p>Signing in...</p>
+        }
+        else
+        {
+            <h2>ECHAT</h2>
+            <p>Sign in to continue</p>
+            <a href="/api/auth/google-login?returnUrl=/" style="
+                display:inline-block; padding:12px 24px;
+                background:#4285F4; color:white; border-radius:4px;
+                text-decoration:none; font-weight:500;">
+                Sign in with Google
+            </a>
+        }
+    </div>
+</div>
+
+@code {
+    private bool _processing;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var uri = new Uri(Navigation.Uri);
+        var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        var token = query["token"];
+
+        if (!string.IsNullOrEmpty(token))
+        {
+            _processing = true;
+            await AuthStateProvider.LoginAsync(token);
+            Navigation.NavigateTo("/", forceLoad: false);
+        }
+    }
+}

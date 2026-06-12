@@ -1,0 +1,506 @@
+html, body {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+
+h1:focus {
+    outline: none;
+}
+
+a, .btn-link {
+    color: #0071c1;
+}
+
+.btn-primary {
+    color: #fff;
+    background-color: #1b6ec2;
+    border-color: #1861ac;
+}
+
+.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
+  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem #258cfb;
+}
+
+.content {
+    padding-top: 1.1rem;
+}
+
+.valid.modified:not([type=checkbox]) {
+    outline: 1px solid #26b050;
+}
+
+.invalid {
+    outline: 1px solid red;
+}
+
+.validation-message {
+    color: red;
+}
+
+#blazor-error-ui {
+    background: lightyellow;
+    bottom: 0;
+    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
+    display: none;
+    left: 0;
+    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+
+    #blazor-error-ui .dismiss {
+        cursor: pointer;
+        position: absolute;
+        right: 0.75rem;
+        top: 0.5rem;
+    }
+
+.blazor-error-boundary {
+    background: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTYiIGhlaWdodD0iNDkiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6eGxpbms9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGxpbmsiIG92ZXJmbG93PSJoaWRkZW4iPjxkZWZzPjxjbGlwUGF0aCBpZD0iY2xpcDAiPjxyZWN0IHg9IjIzNSIgeT0iNTEiIHdpZHRoPSI1NiIgaGVpZ2h0PSI0OSIvPjwvY2xpcFBhdGg+PC9kZWZzPjxnIGNsaXAtcGF0aD0idXJsKCNjbGlwMCkiIHRyYW5zZm9ybT0idHJhbnNsYXRlKC0yMzUgLTUxKSI+PHBhdGggZD0iTTI2My41MDYgNTFDMjY0LjcxNyA1MSAyNjUuODEzIDUxLjQ4MzcgMjY2LjYwNiA1Mi4yNjU4TDI2Ny4wNTIgNTIuNzk4NyAyNjcuNTM5IDUzLjYyODMgMjkwLjE4NSA5Mi4xODMxIDI5MC41NDUgOTIuNzk1IDI5MC42NTYgOTIuOTk2QzI5MC44NzcgOTMuNTEzIDI5MSA5NC4wODE1IDI5MSA5NC42NzgyIDI5MSA5Ny4wNjUxIDI4OS4wMzggOTkgMjg2LjYxNyA5OUwyNDAuMzgzIDk5QzIzNy45NjMgOTkgMjM2IDk3LjA2NTEgMjM2IDk0LjY3ODIgMjM2IDk0LjM3OTkgMjM2LjAzMSA5NC4wODg2IDIzNi4wODkgOTMuODA3MkwyMzYuMzM4IDkzLjAxNjIgMjM2Ljg1OCA5Mi4xMzE0IDI1OS40NzMgNTMuNjI5NCAyNTkuOTYxIDUyLjc5ODUgMjYwLjQwNyA1Mi4yNjU4QzI2MS4yIDUxLjQ4MzcgMjYyLjI5NiA1MSAyNjMuNTA2IDUxWk0yNjMuNTg2IDY2LjAxODNDMjYwLjczNyA2Ni4wMTgzIDI1OS4zMTMgNjcuMTI0NSAyNTkuMzEzIDY5LjMzNyAyNTkuMzEzIDY5LjYxMDIgMjU5LjMzMiA2OS44NjA4IDI1OS4zNzEgNzAuMDg4N0wyNjEuNzk1IDg0LjAxNjEgMjY1LjM4IDg0LjAxNjEgMjY3LjgyMSA2OS43NDc1QzI2Ny44NiA2OS43MzA5IDI2Ny44NzkgNjkuNTg3NyAyNjcuODc5IDY5LjMxNzkgMjY3Ljg3OSA2Ny4xMTgyIDI2Ni40NDggNjYuMDE4MyAyNjMuNTg2IDY2LjAxODNaTTI2My41NzYgODYuMDU0N0MyNjEuMDQ5IDg2LjA1NDcgMjU5Ljc4NiA4Ny4zMDA1IDI1OS43ODYgODkuNzkyMSAyNTkuNzg2IDkyLjI4MzcgMjYxLjA0OSA5My41Mjk1IDI2My41NzYgOTMuNTI5NSAyNjYuMTE2IDkzLjUyOTUgMjY3LjM4NyA5Mi4yODM3IDI2Ny4zODcgODkuNzkyMSAyNjcuMzg3IDg3LjMwMDUgMjY2LjExNiA4Ni4wNTQ3IDI2My41NzYgODYuMDU0N1oiIGZpbGw9IiNGRkU1MDAiIGZpbGwtcnVsZT0iZXZlbm9kZCIvPjwvZz48L3N2Zz4=) no-repeat 1rem/1.8rem, #b32121;
+    padding: 1rem 1rem 1rem 3.7rem;
+    color: white;
+}
+
+    .blazor-error-boundary::after {
+        content: "An error has occurred."
+    }
+
+.loading-progress {
+    position: relative;
+    display: block;
+    width: 8rem;
+    height: 8rem;
+    margin: 20vh auto 1rem auto;
+}
+
+    .loading-progress circle {
+        fill: none;
+        stroke: #e0e0e0;
+        stroke-width: 0.6rem;
+        transform-origin: 50% 50%;
+        transform: rotate(-90deg);
+    }
+
+        .loading-progress circle:last-child {
+            stroke: #1b6ec2;
+            stroke-dasharray: calc(3.141 * var(--blazor-load-percentage, 0%) * 0.8), 500%;
+            transition: stroke-dasharray 0.05s ease-in-out;
+        }
+
+.loading-progress-text {
+    position: absolute;
+    text-align: center;
+    font-weight: bold;
+    inset: calc(20vh + 3.25rem) 0 auto 0.2rem;
+}
+
+    .loading-progress-text:after {
+        content: var(--blazor-load-percentage-text, "Loading");
+    }
+
+code {
+    color: #c02d76;
+}
+
+/* ---------- Markdown messages (rendered via Markdig  MarkupString) ---------- */
+.msg-markdown { }
+.msg-markdown p { margin: 0 0 4px; }
+.msg-markdown p:last-child { margin-bottom: 0; }
+.msg-markdown h1, .msg-markdown h2, .msg-markdown h3, .msg-markdown h4 { margin: 6px 0 4px; line-height: 1.2; }
+.msg-markdown h1 { font-size: 1.2em; }
+.msg-markdown h2 { font-size: 1.1em; }
+.msg-markdown h3, .msg-markdown h4 { font-size: 1em; font-weight: 600; }
+.msg-markdown ul, .msg-markdown ol { margin: 4px 0 4px 22px; padding: 0; }
+.msg-markdown li { margin: 1px 0; }
+.msg-markdown code {
+    background: #f0f0f0;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 0.88em;
+    font-family: var(--bs-font-monospace, ui-monospace, "SF Mono", Consolas, monospace);
+}
+.msg-markdown pre {
+    background: #f6f6f6;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin: 4px 0;
+    overflow-x: auto;
+    font-size: 0.85em;
+    line-height: 1.4;
+}
+.msg-markdown pre code { background: transparent; padding: 0; color: inherit; }
+/* Highlight.js attaches its theme classes directly on <code class="hljs language-xxx">.
+   The github theme (lib/highlight/github.min.css) provides the per-token colors; we just
+   make sure our `.msg-markdown pre code` rule above doesn't fight it. */
+.msg-markdown pre code.hljs { color: inherit; }
+.msg-markdown pre.has-lang { position: relative; }
+.msg-markdown pre.has-lang::before {
+    content: attr(data-lang);
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    font-size: 0.7em;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    pointer-events: none;
+}
+.msg-markdown blockquote {
+    border-left: 3px solid #d0d7de;
+    margin: 4px 0;
+    padding: 1px 10px;
+    color: #57606a;
+}
+.msg-markdown table { border-collapse: collapse; margin: 4px 0; }
+.msg-markdown th, .msg-markdown td { border: 1px solid #d0d7de; padding: 3px 8px; }
+.msg-markdown th { background: #f6f6f6; }
+.msg-markdown a { color: #0969da; text-decoration: none; }
+.msg-markdown a:hover { text-decoration: underline; }
+.msg-markdown hr { border: none; border-top: 1px solid #e0e0e0; margin: 6px 0; }
+.msg-markdown img { max-width: 100%; border-radius: 4px; }
+
+/* ---------- V1 Composer (refined classic, light theme) ----------
+   One rounded surface holds toolbar + input + footer. The surface itself
+   gets the focus ring (via :focus-within) so the composer "lights up"
+   when the textarea is focused regardless of where in the card the focus
+   lands. Modeled after the V1 dark Slack-style composer in
+   docs / Composer Variations, ported to the existing light palette. */
+.echat-composer {
+    margin: 4px 16px 12px;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 10px;
+    transition: border-color .12s ease, box-shadow .12s ease;
+    display: flex;
+    flex-direction: column;
+}
+.echat-composer:focus-within {
+    border-color: #1b6ec2;
+    box-shadow: 0 0 0 1px #1b6ec2;
+}
+
+/* Toolbar row */
+.echat-composer-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 6px;
+    border-bottom: 1px solid #ebedef;
+    flex-wrap: wrap;
+}
+.echat-composer-toolbar .spacer { flex: 1; }
+.echat-composer-toolbar .sep {
+    width: 1px;
+    height: 18px;
+    background: #d0d7de;
+    margin: 0 4px;
+    flex-shrink: 0;
+}
+.echat-tb-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: #6a7280;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background .12s ease, color .12s ease;
+}
+.echat-tb-btn:hover { background: #f0f2f4; color: #1d1c1d; }
+.echat-tb-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.echat-tb-btn.active { background: #e9eef5; color: #1d1c1d; }
+
+/* Format dropdown menu (replaces the Plain / Markdown / HTML toggle row) */
+.echat-format-menu { position: relative; }
+.echat-format-btn {
+    height: 28px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: #6a7280;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    transition: background .12s ease, color .12s ease;
+}
+.echat-format-btn:hover, .echat-format-btn.open { background: #f0f2f4; color: #1d1c1d; }
+.echat-format-popup {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14);
+    padding: 4px;
+    min-width: 240px;
+    z-index: 30;
+}
+.echat-format-option {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    color: #1d1c1d;
+}
+.echat-format-option:hover { background: #f0f2f4; }
+.echat-format-option .check {
+    width: 14px;
+    color: transparent;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+.echat-format-option.active .check { color: #1b6ec2; }
+.echat-format-option .info { flex: 1; min-width: 0; }
+.echat-format-option .label { font-size: 13px; font-weight: 600; }
+.echat-format-option .hint { font-size: 11px; color: #6a7280; margin-top: 1px; }
+.echat-format-option .kbd {
+    font-size: 10px;
+    color: #6a7280;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+}
+
+/* Input row */
+.echat-composer-input {
+    display: flex;
+    align-items: flex-start;
+    padding: 6px 6px 4px;
+}
+.echat-composer-attach {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: #6a7280;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background .12s ease, color .12s ease;
+}
+.echat-composer-attach:hover { background: #f0f2f4; color: #1d1c1d; }
+.echat-composer-attach:disabled { opacity: 0.45; cursor: not-allowed; }
+.echat-composer-textarea-wrap { flex: 1; min-width: 0; padding: 0 6px; }
+.echat-composer-textarea-wrap textarea,
+.echat-composer-textarea-wrap input {
+    width: 100%;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.55;
+    color: #1d1c1d;
+    padding: 6px 0;
+    resize: none;
+    box-sizing: border-box;
+}
+.echat-composer-textarea-wrap textarea {
+    /* Sizing is driven by `echatAutogrow` (data-echat-autogrow="240" on the element):
+       the textarea grows with its content up to 240 px and then scrolls internally.
+       The user's drag-resize would fight that loop, so the handle is off. */
+    resize: none;
+    min-height: 88px;
+    overflow-y: hidden;  /* autogrow flips this to auto only when over the cap */
+}
+
+/* Footer row */
+.echat-composer-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px 6px;
+    border-top: 1px solid #ebedef;
+    font-size: 11px;
+    color: #6a7280;
+}
+.echat-composer-footer .spacer { flex: 1; }
+.echat-composer-footer kbd {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 10px;
+    padding: 1px 5px;
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 3px;
+    color: #6a7280;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+}
+
+/* Send + AI split button: one connected pill, accent-colored.
+   The .ai half toggles to a violet gradient when AI auto-reply is on. */
+.echat-send-split {
+    display: inline-flex;
+    align-items: stretch;
+}
+.echat-send-split button {
+    height: 32px;
+    border: none;
+    background: #1b6ec2;
+    color: #fff;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background .12s ease, opacity .12s ease;
+}
+.echat-send-split button:hover:not(:disabled) { background: #1d7ac1; }
+.echat-send-split button:disabled {
+    background: #c5c8cd;
+    color: #fff;
+    cursor: not-allowed;
+}
+.echat-send-split .send {
+    padding: 0 14px;
+    border-top-left-radius: 6px;
+    border-bottom-left-radius: 6px;
+}
+.echat-send-split .ai {
+    padding: 0 10px;
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+    border-left: 1px solid rgba(255, 255, 255, 0.25);
+}
+.echat-send-split .ai.ai-on {
+    background: linear-gradient(180deg, #8b6dff, #6a44e8);
+}
+.echat-send-split .ai.ai-on:hover:not(:disabled) {
+    background: linear-gradient(180deg, #9c81ff, #7958f0);
+}
+
+/* @-mention + emoji popovers: shared shape, same drop-down vibe as the format popup. */
+.echat-popover-wrap { position: relative; display: inline-flex; }
+.echat-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14);
+    padding: 6px;
+    z-index: 30;
+}
+
+/* Mention picker */
+.echat-mention-popup { width: 280px; }
+.echat-mention-search {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 13px;
+    margin-bottom: 4px;
+    outline: none;
+    color: #1d1c1d;
+    background: #fff;
+}
+.echat-mention-search:focus {
+    border-color: #1b6ec2;
+    box-shadow: 0 0 0 2px rgba(27, 110, 194, 0.15);
+}
+.echat-mention-list {
+    max-height: 240px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+.echat-mention-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    color: #1d1c1d;
+    font-size: 13px;
+}
+.echat-mention-item:hover, .echat-mention-item.active { background: #f0f2f4; }
+.echat-mention-item img {
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+.echat-mention-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.echat-mention-item .role { font-size: 11px; color: #6a7280; flex-shrink: 0; }
+.echat-mention-empty {
+    padding: 14px 10px;
+    text-align: center;
+    color: #6a7280;
+    font-size: 12px;
+}
+
+/* Emoji picker */
+.echat-emoji-popup { width: 280px; }
+.echat-emoji-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 2px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+.echat-emoji-btn {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background .1s ease;
+}
+.echat-emoji-btn:hover { background: #f0f2f4; }
+
+/* Attachment chip (shown above the textarea when an upload is in flight).
+   Replaces the standalone yellow banner; keeps status visible right where
+   the file came from. The yellow banner still fires for skipped/failed cases. */
+.echat-attach-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px 4px 10px;
+    background: #f6f8fa;
+    border: 1px solid #ebedef;
+    border-radius: 8px;
+    font-size: 12px;
+    color: #1d1c1d;
+    margin-bottom: 4px;
+    max-width: 320px;
+}
+.echat-attach-chip .name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.echat-attach-chip .size { color: #6a7280; font-size: 11px; }

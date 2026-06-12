@@ -1,0 +1,614 @@
+﻿@using ECHAT.Client.App.Services
+@using ECHAT.Models.Dtos
+@using ECHAT.Models.Events
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.Extensions.Logging
+@using System.Security.Claims
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject TokenAuthStateProvider AuthStateProvider
+@inject AuthenticationStateProvider AuthState
+@inject SignalRRealtimeClient Realtime
+@inject NavigationManager Navigation
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject ECHAT.Client.App.Services.ChatSdkService ChatSdk
+@inject ECHAT.Client.Core.Services.DeviceEnrollmentService DeviceEnrollment
+@inject ILogger<MainLayout> Logger
+
+<AuthorizeView>
+    <Authorized>
+        <div class="layout-root">
+            @* Barra laterale *@
+            <div class="sidebar @(_collapsed ? "sidebar-collapsed" : "")">
+                <div class="sidebar-header">
+                    @if (!_collapsed)
+                    {
+                        <span class="sidebar-brand">ECHAT</span>
+                    }
+                    <button class="sidebar-toggle" @onclick="ToggleSidebar" title="@(_collapsed ? "Expand" : "Collapse")">
+                        @if (_collapsed)
+                        {
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/></svg>
+                        }
+                        else
+                        {
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/></svg>
+                        }
+                    </button>
+                </div>
+
+                @if (!_collapsed)
+                {
+                    @* Intestazione conversazioni con pulsante + e badge totale dei non letti *@
+                    <div class="sidebar-section-header">
+                        <span>
+                            Conversations
+                            @if (TotalUnread > 0)
+                            {
+                                <span class="sidebar-total-badge" title="@TotalUnread unread">@(TotalUnread > 99 ? "99+" : TotalUnread.ToString())</span>
+                            }
+                        </span>
+                        <button class="sidebar-add-btn" @onclick="ShowNewDialog" title="New conversation">+</button>
+                    </div>
+
+                    @if (_showNewDialog)
+                    {
+                        <div class="sidebar-new-conv">
+                            <input @bind="_newName" @bind:event="oninput" @onkeydown="OnNewKeyDown" placeholder="Name..." class="sidebar-input" />
+                            <div style="display:flex; gap:4px; margin-top:4px;">
+                                <button class="sidebar-btn-create" @onclick="CreateConversation">Create</button>
+                                <button class="sidebar-btn-cancel" @onclick="() => _showNewDialog = false">Cancel</button>
+                            </div>
+                        </div>
+                    }
+
+                    @* Elenco conversazioni *@
+                    <div class="sidebar-conversations">
+                        @if (_conversations == null)
+                        {
+                            <div class="sidebar-loading">Loading...</div>
+                        }
+                        else if (_conversations.Count == 0)
+                        {
+                            <div class="sidebar-empty">No conversations yet.</div>
+                        }
+                        else
+                        {
+                            @foreach (var c in _conversations)
+                            {
+                                var isActive = Navigation.Uri.Contains(c.Id.ToString(), StringComparison.OrdinalIgnoreCase);
+                                var unread = _unread.TryGetValue(c.Id, out var u) ? u : 0;
+                                <div class="sidebar-conv-item @(isActive ? "active" : "")"
+                                     @onclick="@(() => Navigation.NavigateTo($"/conversations/{c.Id}"))">
+                                    <span class="sidebar-conv-name" style="@(unread > 0 ? "font-weight:700;" : "")">@c.Name</span>
+                                    @if (unread > 0)
+                                    {
+                                        <span class="sidebar-unread-badge">@(unread > 99 ? "99+" : unread.ToString())</span>
+                                    }
+                                </div>
+                            }
+                        }
+                    </div>
+
+                    @* Link Platform Admin (solo se l'utente è PlatformAdmin) *@
+                    @if (context.User.FindFirst("PlatformRole")?.Value == "PlatformAdmin")
+                    {
+                        <div class="sidebar-section-header" style="margin-top:8px;">
+                            <span>Admin</span>
+                        </div>
+                        <div class="sidebar-conv-item" @onclick="@(() => Navigation.NavigateTo("/admin"))">
+                            <span class="sidebar-conv-name">Platform Admin</span>
+                        </div>
+                    }
+                }
+
+                @* Account utente in fondo *@
+                <div class="sidebar-user">
+                    @{
+                        var userId = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                        var displayName = context.User.Identity?.Name;
+                    }
+                    @if (!_collapsed)
+                    {
+                        @if (!string.IsNullOrEmpty(userId))
+                        {
+                            <img src="api/avatar/@userId" alt="@displayName" class="sidebar-avatar" />
+                        }
+                        <div class="sidebar-user-info">
+                            <span class="sidebar-user-name">@displayName</span>
+                            <div style="display:flex; gap:6px; align-items:center;">
+                                <button class="sidebar-logout" @onclick="OpenKeyModal"
+                                        title="Back up or restore your device key">Key</button>
+                                <button class="sidebar-logout" @onclick="Logout">Logout</button>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        @if (!string.IsNullOrEmpty(userId))
+                        {
+                            <img src="api/avatar/@userId" alt="@displayName" class="sidebar-avatar" title="@displayName" />
+                        }
+                    }
+                </div>
+            </div>
+
+            @* Contenuto principale *@
+            <main class="main-content">
+                @Body
+            </main>
+        </div>
+
+        @* ---- Device key modal: backup (download) + restore (drop / file picker) ---- *@
+        @if (_showKeyModal)
+        {
+            <div class="echat-keymodal-overlay"
+                 style="position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:1000;"
+                 @onclick="CloseKeyModal">
+                <div style="background:#fff; color:#1d1c1d; width:min(440px,92vw); border-radius:10px; padding:20px; box-shadow:0 10px 40px rgba(0,0,0,.3);"
+                     @onclick:stopPropagation="true">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                        <h3 style="margin:0; font-size:1.05rem;">🔑 Device key</h3>
+                        <button class="sidebar-logout" @onclick="CloseKeyModal" title="Close">✕</button>
+                    </div>
+
+                    @if (_keyJustGenerated)
+                    {
+                        <div style="background:#fff4ce; border:1px solid #e8d27a; border-radius:6px; padding:10px; font-size:.86rem; margin-bottom:12px;">
+                            A new device key was created on this browser. <strong>Download a backup now</strong>; it's the only way to restore access after clearing this browser or to read these chats on another browser.
+                        </div>
+                    }
+
+                    <p style="font-size:.86rem; margin:0 0 8px;">
+                        <strong>Backup.</strong> Save your key to a file. Keep it safe; anyone with it can read your chats.
+                    </p>
+                    <button class="sidebar-btn-create" style="width:100%; margin-bottom:16px;" @onclick="BackupKey">⤓ Download backup file</button>
+
+                    <p style="font-size:.86rem; margin:0 0 8px;">
+                        <strong>Restore.</strong> Drop a saved key file here, or choose one. Your chats reopen and the page reloads.
+                    </p>
+                    <div id="echat-key-drop"
+                         style="padding:16px 8px; border:1px dashed #888; border-radius:8px; font-size:.82rem; text-align:center; opacity:.85; margin-bottom:8px;"
+                         title="Drag your saved key file here to restore access">⤓ Drop key file here</div>
+                    <button class="sidebar-btn-cancel" style="width:100%;" @onclick="RestoreKey">Choose a file…</button>
+
+                    @if (!string.IsNullOrEmpty(_keyModalMsg))
+                    {
+                        <p style="font-size:.8rem; color:#a33; margin:10px 0 0;">@_keyModalMsg</p>
+                    }
+                </div>
+            </div>
+        }
+    </Authorized>
+    <NotAuthorized>
+        @Body
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private bool _collapsed;
+    private List<ConversationDto>? _conversations;
+    private bool _showNewDialog;
+    private string _newName = "";
+    private readonly Dictionary<Guid, int> _unread = new();
+    private bool _initialized;
+    private Guid _myUserId;
+
+    private DotNetObjectReference<MainLayout>? _layoutRef;
+    private int _focusListenerId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        AuthState.AuthenticationStateChanged += OnAuthChanged;
+        Navigation.LocationChanged += OnLocationChanged;
+        Realtime.OnMessageAvailable += OnMessageAvailableGlobal;
+        Realtime.OnMemberChanged += OnMemberChangedGlobal;
+        Realtime.OnConversationChanged += OnConversationChangedGlobal;
+        await TryInitializeAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Collega una sola volta il focus listener e il bridge dello stato di lettura, così
+        // possiamo reagire quando l'utente cambia tab/app e quando la chat torna in fondo.
+        // Lo facciamo in OnAfterRenderAsync perché il modulo JS potrebbe non essere ancora
+        // caricato quando OnInitializedAsync termina.
+        if (firstRender)
+        {
+            _layoutRef = DotNetObjectReference.Create(this);
+            try
+            {
+                _focusListenerId = await JS.InvokeAsync<int>(
+                    "echatFocus.onFocusChange", _layoutRef, nameof(OnWindowFocusChangedJs));
+                await JS.InvokeVoidAsync("echatRead.setLayoutRef", _layoutRef);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Focus / read-state JS wiring failed");
+            }
+        }
+
+        // Wire the key-file drop zone. Idempotent per element (JS guards via a dataset flag) and
+        // re-run each render so it re-attaches after a sidebar collapse/expand recreates the node.
+        // Best-effort: the "Restore key" button is the fallback if this no-ops.
+        try { await JS.InvokeVoidAsync("echatCrypto.attachKeyDrop", "echat-key-drop"); }
+        catch { /* echatCrypto not ready / element absent; retried next render */ }
+    }
+
+    /// <summary>
+    /// Chiamato dal JS quando la finestra prende/perde il focus o cambia la visibilità del tab.
+    /// Quando il focus torna e l'utente è su una conversazione **già in fondo allo scroll**,
+    /// quella conversazione è considerata "letta": azzera il contatore dei non letti.
+    /// (Scroll in alto + focus non azzera nulla; ci pensa `markRead` dal gestore di scroll.)
+    /// </summary>
+    [JSInvokable]
+    public async Task OnWindowFocusChangedJs(bool focused)
+    {
+        if (!focused) return;
+        var activeId = TryGetActiveConversationId();
+        if (activeId is not { } id) return;
+
+        bool nearBottom;
+        try { nearBottom = await JS.InvokeAsync<bool>("echatScroll.isNearBottom", "messages-container", 150); }
+        catch { nearBottom = true; } // nessun container chat ancora  trattalo come "niente da tracciare"
+
+        if (nearBottom && _unread.Remove(id))
+        {
+            await UpdateTitleBadgeAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>
+    /// Chiamato da <c>echatRead.markRead</c> dalla pagina chat quando l'utente torna in fondo
+    /// a una conversazione attiva. Azzera il contatore dei non letti per quella conversazione.
+    /// </summary>
+    [JSInvokable]
+    public async Task MarkConversationRead(string convIdStr)
+    {
+        if (!Guid.TryParse(convIdStr, out var convId)) return;
+        if (_unread.Remove(convId))
+        {
+            await UpdateTitleBadgeAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async void OnAuthChanged(Task<AuthenticationState> task)
+    {
+        await TryInitializeAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Init idempotente: se l'utente è loggato, carica le conversazioni, connette SignalR,
+    /// entra nei gruppi di tutte le conversazioni e chiede una volta il permesso di notifica.
+    /// Si può chiamare più volte: gira di nuovo dopo il login perché cambia lo stato di auth.
+    /// </summary>
+    private async Task TryInitializeAsync()
+    {
+        var state = await AuthState.GetAuthenticationStateAsync();
+        if (state.User.Identity?.IsAuthenticated != true) return;
+
+        var idClaim = state.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (Guid.TryParse(idClaim, out var uid)) _myUserId = uid;
+
+        // E2EE (S2/S4): registra le chiavi pubbliche di questo device PRIMA di tutto. Senza, il server
+        // rifiuta gli invii (SenderIdentityHandler) e nessuno può wrappare la CEK per noi. Prerequisito
+        // di invio/ricezione, quindi lo facciamo subito dopo aver confermato l'auth.
+        try
+        {
+            await DeviceEnrollment.EnsureRegisteredAsync();
+            // Se la chiave è stata APPENA generata su questo browser (IndexedDB vuoto), apriamo il
+            // modale sollecitando il backup: è l'unico modo per recuperare l'accesso dopo un wipe.
+            var origin = await JS.InvokeAsync<string>("echatCrypto.deviceOrigin");
+            if (origin is "generated" or "regenerated")
+            {
+                _keyJustGenerated = true;
+                _showKeyModal = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Device enrollment failed for user {UserId}; sending/receiving will not work until this succeeds", _myUserId);
+        }
+
+        await LoadConversations();
+        try
+        {
+            await Realtime.ConnectAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "SignalR connect failed for user {UserId}", _myUserId);
+        }
+
+        if (!_initialized)
+        {
+            _initialized = true;
+            try { await JS.InvokeVoidAsync("echatNotify.requestPermission"); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// Reagisce a un cambio di membri di una conversazione. Eventi che riguardano *me*:
+    /// aggiunto  ricarico la sidebar così la conv compare; rimosso  la tolgo, e se la stavo
+    /// guardando torno al root così la UI non resta su una conversazione che non posso più leggere.
+    /// Eventi su *altri*: lascio fare a Chat.razor (ricarica il pannello membri) e ricarico solo
+    /// se ho una vista che dipende dal conteggio (per ora niente).
+    /// </summary>
+    private async void OnMemberChangedGlobal(MemberChangedEvent evt)
+    {
+        try
+        {
+            if (evt.UserId != _myUserId) return;
+
+            if (evt.Action == "Removed")
+            {
+                _conversations?.RemoveAll(c => c.Id == evt.ConversationId);
+                _unread.Remove(evt.ConversationId);
+
+                var activeId = TryGetActiveConversationId();
+                if (activeId == evt.ConversationId)
+                    Navigation.NavigateTo("/", forceLoad: false);
+
+                await UpdateTitleBadgeAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+            else if (evt.Action == "Added")
+            {
+                await LoadConversations();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex,
+                "OnMemberChangedGlobal failed for conversation {ConversationId} user {UserId} action {Action}",
+                evt.ConversationId, evt.UserId, evt.Action);
+        }
+    }
+
+    private async void OnConversationChangedGlobal(ConversationChangedEvent evt)
+    {
+        try
+        {
+            if (evt.ChangeType == "Renamed")
+            {
+                var conv = _conversations?.FirstOrDefault(c => c.Id == evt.ConversationId);
+                if (conv is not null && !string.IsNullOrEmpty(evt.Name))
+                {
+                    conv.Name = evt.Name;
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            else if (evt.ChangeType == "Deleted")
+            {
+                _conversations?.RemoveAll(c => c.Id == evt.ConversationId);
+                _unread.Remove(evt.ConversationId);
+
+                var activeId = TryGetActiveConversationId();
+                if (activeId == evt.ConversationId)
+                    Navigation.NavigateTo("/", forceLoad: false);
+
+                await UpdateTitleBadgeAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex,
+                "OnConversationChangedGlobal failed for conversation {ConversationId} change {ChangeType}",
+                evt.ConversationId, evt.ChangeType);
+        }
+    }
+
+    private async void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        // Aprire una conversazione azzera il suo contatore dei non letti.
+        var activeId = TryGetActiveConversationId();
+        if (activeId is { } id && _unread.Remove(id))
+            await UpdateTitleBadgeAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Tracking dei letti stile Slack. Un messaggio è "letto all'arrivo" solo se **tutte e tre**:
+    ///   1. la conversazione del messaggio è la route attiva (<c>/conversations/{id}</c>),
+    ///   2. la finestra ha il focus e il tab è visibile,
+    ///   3. il container dei messaggi è scrollato vicino al fondo.
+    /// Tutto il resto conta come non letto: incrementa il badge, suona il ding e lascia decidere
+    /// a <c>echatNotify.show</c> se mostrare un popup desktop (si auto-sopprime se la finestra ha il focus).
+    ///
+    /// La terza condizione risolve il caso "sto leggendo la cronologia scrollato in alto e arriva
+    /// un messaggio nuovo"; senza, il messaggio cadrebbe silenzioso sotto la fold senza segnali.
+    /// </summary>
+    private async void OnMessageAvailableGlobal(MessageAvailableEvent evt)
+    {
+        var activeId = TryGetActiveConversationId();
+        var isActiveConv = activeId == evt.ConversationId;
+
+        bool windowFocused;
+        try { windowFocused = await JS.InvokeAsync<bool>("echatFocus.isFocused"); }
+        catch { windowFocused = true; }
+
+        bool nearBottom = false;
+        if (isActiveConv)
+        {
+            try { nearBottom = await JS.InvokeAsync<bool>("echatScroll.isNearBottom", "messages-container", 150); }
+            catch { nearBottom = false; }
+        }
+
+        var readOnArrival = isActiveConv && windowFocused && nearBottom;
+        Logger.LogDebug(
+            "OnMessageAvailableGlobal conv={ConversationId} seq={Seq} active={ActiveConversationId} focused={WindowFocused} nearBottom={NearBottom} readOnArrival={ReadOnArrival}",
+            evt.ConversationId, evt.Seq, activeId, windowFocused, nearBottom, readOnArrival);
+        if (readOnArrival) return;
+
+        // Incrementa i non letti in ogni caso che non sia "letto all'arrivo", anche per la
+        // conv attiva se l'utente è scrollato in alto o la finestra non ha focus. Il contatore
+        // si azzera da solo tramite OnWindowFocusChangedJs (focus ripreso in fondo) o
+        // MarkConversationRead (scroll di nuovo al fondo).
+        _unread[evt.ConversationId] = (_unread.TryGetValue(evt.ConversationId, out var n) ? n : 0) + 1;
+
+        var conv = _conversations?.FirstOrDefault(c => c.Id == evt.ConversationId);
+        var name = conv?.Name ?? "ECHAT";
+
+        // Popup desktop: si auto-sopprime se la finestra ha il focus.
+        try { await JS.InvokeVoidAsync("echatNotify.show", name, "New message"); } catch { }
+        // Il ding suona ogni volta che non è "letto all'arrivo" (siamo già usciti in quel caso).
+        try { await JS.InvokeVoidAsync("echatNotify.playSound"); } catch { }
+
+        await UpdateTitleBadgeAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Totale dei non letti su tutte le conversazioni, mostrato nell'header della sidebar.</summary>
+    private int TotalUnread => _unread.Values.Sum();
+
+    private async Task UpdateTitleBadgeAsync()
+    {
+        var total = _unread.Values.Sum();
+        try { await JS.InvokeVoidAsync("echatNotify.setUnreadTitleBadge", total, "ECHAT"); } catch { }
+    }
+
+    private Guid? TryGetActiveConversationId()
+    {
+        // Pattern URL: /conversations/{guid}
+        var uri = new Uri(Navigation.Uri);
+        var segments = uri.AbsolutePath.Trim('/').Split('/');
+        if (segments.Length >= 2 && segments[0].Equals("conversations", StringComparison.OrdinalIgnoreCase)
+            && Guid.TryParse(segments[1], out var id))
+            return id;
+        return null;
+    }
+
+    private async Task LoadConversations()
+    {
+        try
+        {
+            var token = await AuthStateProvider.GetTokenAsync();
+            if (!string.IsNullOrEmpty(token))
+                Http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            _conversations = await Http.GetFromJsonAsync<List<ConversationDto>>("api/conversations");
+        }
+        catch { _conversations ??= new(); }
+    }
+
+    private void ToggleSidebar() => _collapsed = !_collapsed;
+
+    private void ShowNewDialog()
+    {
+        _showNewDialog = true;
+        _newName = "";
+    }
+
+    private async Task OnNewKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await CreateConversation();
+        if (e.Key == "Escape") _showNewDialog = false;
+    }
+
+    private async Task CreateConversation()
+    {
+        if (string.IsNullOrWhiteSpace(_newName)) return;
+        var token = await AuthStateProvider.GetTokenAsync();
+        if (!string.IsNullOrEmpty(token))
+            Http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var response = await Http.PostAsJsonAsync("api/conversations", new { Name = _newName });
+        if (response.IsSuccessStatusCode)
+        {
+            var created = await response.Content.ReadFromJsonAsync<ConversationDto>();
+            // E2EE (S1): il server non genera la CEK. Il creatore provisiona l'epoch 1 lato client
+            // (genera la CEK, la wrappa con la propria chiave pubblica RSA e la posta). Se fallisce,
+            // la conversazione sarebbe orfana (senza chiavi): la cancelliamo per non lasciare stato rotto.
+            try
+            {
+                await ChatSdk.ProvisionConversationKeysAsync(created!.Id, epochId: 1);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "CEK provisioning failed for new conversation {ConversationId}; rolling back", created!.Id);
+                try { await ChatSdk.DeleteConversationAsync(created.Id); } catch { /* best-effort cleanup */ }
+                return;
+            }
+            _showNewDialog = false;
+            _newName = "";
+            await LoadConversations();
+            Navigation.NavigateTo($"/conversations/{created!.Id}");
+        }
+    }
+
+    private async Task Logout()
+    {
+        await AuthStateProvider.LogoutAsync();
+        Navigation.NavigateTo("/login", forceLoad: false);
+    }
+
+    // ---- Device key backup/restore modal -----
+    private bool _showKeyModal;
+    private bool _keyJustGenerated;   // true quando la chiave è stata appena generata  sollecita il backup
+    private string? _keyModalMsg;
+
+    private void OpenKeyModal()
+    {
+        _keyModalMsg = null;
+        _showKeyModal = true;
+    }
+
+    private void CloseKeyModal()
+    {
+        _showKeyModal = false;
+        _keyJustGenerated = false;
+    }
+
+    // Scarica la chiave del device come file: l'utente la custodisce per ripristinare l'accesso dopo
+    // una pulizia del browser o su un altro browser (stessa identità  i wrap CEK esistenti si aprono).
+    private async Task BackupKey()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("echatCrypto.downloadDeviceKeyFile");
+            _keyModalMsg = null;
+            _keyJustGenerated = false; // backup fatto: niente più sollecito
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Device key backup (download) failed");
+            _keyModalMsg = "Backup failed: " + ex.Message;
+        }
+    }
+
+    // Ripristina la chiave da un file salvato; al successo ricarichiamo così l'enrollment ri-registra
+    // la chiave importata e il flusso messaggi riparte con l'identità corretta.
+    private async Task RestoreKey()
+    {
+        try
+        {
+            var imported = await JS.InvokeAsync<bool>("echatCrypto.importDeviceKeyFromPicker");
+            if (imported)
+                Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Device key restore (import) failed");
+            _keyModalMsg = "Restore failed: " + ex.Message;
+        }
+    }
+
+    public void Dispose()
+    {
+        AuthState.AuthenticationStateChanged -= OnAuthChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
+        Realtime.OnMessageAvailable -= OnMessageAvailableGlobal;
+        Realtime.OnMemberChanged -= OnMemberChangedGlobal;
+        Realtime.OnConversationChanged -= OnConversationChangedGlobal;
+        if (_focusListenerId > 0)
+        {
+            try { _ = JS.InvokeVoidAsync("echatFocus.removeFocusListener", _focusListenerId); }
+            catch { }
+        }
+        _layoutRef?.Dispose();
+    }
+}

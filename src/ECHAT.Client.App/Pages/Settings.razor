@@ -1,0 +1,111 @@
+@page "/settings"
+@attribute [Authorize]
+@using ECHAT.Client.App.Services
+@using ECHAT.Client.Core.Interfaces
+@inject TokenAuthStateProvider AuthState
+@inject LocalStorageService Storage
+@inject IDeviceKeyStore DeviceKey
+@inject IOutbox Outbox
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>Settings · ECHAT</PageTitle>
+
+<div style="max-width:640px; margin:24px auto; padding:0 16px;">
+    <h2>Settings</h2>
+
+    @if (_user is not null)
+    {
+        <section style="margin-top:24px; padding:16px; border:1px solid #e0e0e0; border-radius:8px;">
+            <h4 style="margin-top:0;">Account</h4>
+            <p><strong>Name:</strong> @_user.Name</p>
+            <p><strong>Email:</strong> @_user.Email</p>
+            <button class="btn btn-outline-danger" @onclick="LogoutAsync">Sign out</button>
+        </section>
+    }
+
+    <section style="margin-top:24px; padding:16px; border:1px solid #e0e0e0; border-radius:8px;">
+        <h4 style="margin-top:0;">Device</h4>
+        <p>This browser stores a device key, your message cache, and any unsent messages locally. None of these leave your device unencrypted.</p>
+        <p><strong>Device key fingerprint:</strong> <code>@_keyFingerprint</code></p>
+        <p><strong>Pending outgoing messages:</strong> @_pending</p>
+        <button class="btn btn-outline-warning" @onclick="ClearLocalDataAsync" disabled="@_clearing">
+            @(_clearing ? "Clearing..." : "Clear local cache")
+        </button>
+        <p style="margin-top:8px; font-size:0.85em; color:#888;">
+            Removes cached messages and unsent queue. Your device key is regenerated on next sign-in,
+            so you'll need to be re-added to existing conversations to read history.
+        </p>
+    </section>
+
+    <section style="margin-top:24px; padding:16px; border:1px solid #e0e0e0; border-radius:8px;">
+        <h4 style="margin-top:0;">About</h4>
+        <p>ECHAT MVP: server-managed CEK distribution, per-epoch key rotation, append-only message log.</p>
+        <p><a href="/conversations">Back to conversations</a></p>
+    </section>
+</div>
+
+@code {
+    private UserInfo? _user;
+    private string _keyFingerprint = "loading...";
+    private int _pending;
+    private bool _clearing;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthState.GetAuthenticationStateAsync();
+        if (state.User.Identity?.IsAuthenticated == true)
+        {
+            _user = new UserInfo
+            {
+                Name = state.User.FindFirst("name")?.Value
+                       ?? state.User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+                       ?? "(unknown)",
+                Email = state.User.FindFirst("email")?.Value
+                        ?? state.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                        ?? "(unknown)"
+            };
+        }
+
+        try
+        {
+            var keys = await DeviceKey.EnsureDeviceAsync();
+            // Fingerprint sulla chiave pubblica di firma (ECDSA): identifica il device in modo stabile.
+            _keyFingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(keys.EcdsaSpki))[..16];
+        }
+        catch
+        {
+            _keyFingerprint = "unavailable";
+        }
+
+        var pending = await Outbox.GetPendingAsync();
+        _pending = pending.Count;
+    }
+
+    private async Task LogoutAsync()
+    {
+        await AuthState.LogoutAsync();
+        Nav.NavigateTo("/login", forceLoad: true);
+    }
+
+    private async Task ClearLocalDataAsync()
+    {
+        _clearing = true;
+        StateHasChanged();
+        try
+        {
+            await JS.InvokeVoidAsync("localStorage.clear");
+        }
+        finally
+        {
+            _clearing = false;
+            Nav.NavigateTo("/login", forceLoad: true);
+        }
+    }
+
+    private class UserInfo
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+    }
+}

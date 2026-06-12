@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <!-- Coverage scope: unit tests measure business logic in the *.Core projects (+ Models).
+       The *.App layers (Blazor UI, thin host/controllers/hub, EF adapters, generated and migration
+       code) are out of the unit-test scope by design and are excluded here; they are exercised by
+       integration tests, a WebApplicationFactory E2E suite, and in-browser checks. See doc section 4. -->
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <Exclude>[ECHAT.Client.App]*,[ECHAT.Server.App]*</Exclude>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

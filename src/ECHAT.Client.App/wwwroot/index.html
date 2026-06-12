@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ECHAT.Client.App</title>
+    <base href="/" />
+    <link rel="stylesheet" href="css/bootstrap/bootstrap.min.css" />
+    <link rel="stylesheet" href="css/app.css" />
+    <!-- highlight.js theme; matches the github look. JS bundle is loaded later in <body>. -->
+    <link rel="stylesheet" href="lib/highlight/github.min.css" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <link href="ECHAT.Client.App.styles.css" rel="stylesheet" />
+    <link href="manifest.webmanifest" rel="manifest" />
+    <link rel="apple-touch-icon" sizes="512x512" href="icon-512.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png" />
+</head>
+
+<body>
+    <div id="app">
+        <svg class="loading-progress">
+            <circle r="40%" cx="50%" cy="50%" />
+            <circle r="40%" cx="50%" cy="50%" />
+        </svg>
+        <div class="loading-progress-text"></div>
+    </div>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="" class="reload">Reload</a>
+        <a class="dismiss">🗙</a>
+    </div>
+    <!-- All page-level JS lives in js/echat.js. CSP forbids inline <script> blocks (no
+         'unsafe-inline'), so do not add any inline JS here; extend echat.js instead.
+         The query string busts browser + service-worker cache when contents change. -->
+    <!-- highlight.js: applied client-side from MessageBubble.OnAfterRenderAsync via echatHighlight.applyAll. -->
+    <script src="lib/highlight/highlight.min.js"></script>
+    <script src="js/echat.js?v=2026-06-09-keyfile2"></script>
+    <script src="_framework/blazor.webassembly.js"></script>
+</body>
+
+</html>
